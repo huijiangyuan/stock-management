@@ -1,0 +1,27 @@
+name: StockInventoryApp
+options:
+  bundleIdPrefix: com.stockmanager
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  StockInventoryApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: StockInventoryApp
+    info:
+      properties:
+        NSCameraUsageDescription: "用于扫描原材料包装条码，快速识别商品并自动完成出入库记账"
+        UILaunchScreen: {}
+        CFBundleDisplayName: "库存管理"
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+schemes:
+  StockInventoryApp:
+    build:
+      targets:
+        StockInventoryApp: all
+    run:
+      config: Release
+    archive:
+      config: Release

@@ -1,0 +1,213 @@
+import Foundation
+import SwiftData
+
+// MARK: - 离线数据包 DTO（扁平化外键，便于跨设备恢复）
+
+struct SKUDTO: Codable {
+    let skuId, skuCode, skuName, categoryName, baseUnit: String
+    let shelfLifeDays: Int
+    let createdAt: Date
+    let packagingUnits: [PackagingUnitDTO]
+    let featureSamples: [FeatureSampleDTO]
+}
+
+struct PackagingUnitDTO: Codable {
+    let unitId, unitName, unitType: String
+    let conversionRatio: Double
+    let barcode: String?
+}
+
+struct FeatureSampleDTO: Codable {
+    let sampleId, angleTag: String
+    let ocrTextContent: String?
+    let sampleImagePath: String?
+}
+
+struct BatchDTO: Codable {
+    let batchId, batchNo, skuCode: String
+    let productionDate, expirationDate: Date?
+    let supplierName: String?
+    let inboundPrice: Double?
+}
+
+struct InventoryDTO: Codable {
+    let inventoryId, locationName, skuCode: String
+    let batchNo: String?
+    let qtyBaseUnit: Double
+    let updatedAt: Date
+}
+
+struct OrderItemDTO: Codable {
+    let itemId, skuCode: String
+    let unitId: String?
+    let batchNo: String?
+    let operatingQty, conversionRatio, totalBaseQty: Double
+    let recognitionMode: String?
+    let confidenceScore: Double?
+}
+
+struct OrderDTO: Codable {
+    let orderId, orderNo, orderType: String
+    let remark: String?
+    let createdAt: Date
+    let items: [OrderItemDTO]
+}
+
+struct ExportPacket: Codable {
+    let version: Int
+    let exportedAt: Date
+    let skus: [SKUDTO]
+    let batches: [BatchDTO]
+    let inventories: [InventoryDTO]
+    let orders: [OrderDTO]
+}
+
+/// 离线数据导出/导入（JSON 数据包，可通过 AirDrop / 微信分享）。
+/// 导入按唯一 id 幂等合并：已存在则跳过，不存在则插入。
+enum ExportImport {
+    static func exportAll(context: ModelContext) throws -> ExportPacket {
+        let skus = try context.fetch(FetchDescriptor<RawMaterialSKU>())
+        let batches = try context.fetch(FetchDescriptor<StockBatch>())
+        let inventories = try context.fetch(FetchDescriptor<StockInventory>())
+        let orders = try context.fetch(FetchDescriptor<StockOrderHeader>())
+
+        return ExportPacket(
+            version: 1,
+            exportedAt: Date(),
+            skus: skus.map { s in
+                SKUDTO(skuId: s.skuId, skuCode: s.skuCode, skuName: s.skuName,
+                       categoryName: s.categoryName, baseUnit: s.baseUnit,
+                       shelfLifeDays: s.shelfLifeDays, createdAt: s.createdAt,
+                       packagingUnits: s.packagingUnits.map {
+                           PackagingUnitDTO(unitId: $0.unitId, unitName: $0.unitName,
+                                            unitType: $0.unitType,
+                                            conversionRatio: $0.conversionRatio, barcode: $0.barcode)
+                       },
+                       featureSamples: s.featureSamples.map {
+                           FeatureSampleDTO(sampleId: $0.sampleId, angleTag: $0.angleTag,
+                                            ocrTextContent: $0.ocrTextContent,
+                                            sampleImagePath: $0.sampleImagePath)
+                       })
+            },
+            batches: batches.map {
+                BatchDTO(batchId: $0.batchId, batchNo: $0.batchNo,
+                         skuCode: $0.sku?.skuCode ?? "",
+                         productionDate: $0.productionDate, expirationDate: $0.expirationDate,
+                         supplierName: $0.supplierName, inboundPrice: $0.inboundPrice)
+            },
+            inventories: inventories.map {
+                InventoryDTO(inventoryId: $0.inventoryId, locationName: $0.locationName,
+                             skuCode: $0.sku?.skuCode ?? "",
+                             batchNo: $0.batch?.batchNo, qtyBaseUnit: $0.qtyBaseUnit,
+                             updatedAt: $0.updatedAt)
+            },
+            orders: orders.map { o in
+                OrderDTO(orderId: o.orderId, orderNo: o.orderNo, orderType: o.orderType,
+                         remark: o.remark, createdAt: o.createdAt,
+                         items: o.items.map {
+                             OrderItemDTO(itemId: $0.itemId, skuCode: $0.sku?.skuCode ?? "",
+                                          unitId: $0.unit?.unitId, batchNo: $0.batch?.batchNo,
+                                          operatingQty: $0.operatingQty,
+                                          conversionRatio: $0.conversionRatio,
+                                          totalBaseQty: $0.totalBaseQty,
+                                          recognitionMode: $0.recognitionMode,
+                                          confidenceScore: $0.confidenceScore)
+                         })
+            }
+        )
+    }
+
+    /// 写入 Documents 目录，返回文件 URL（供 UIActivityViewController 分享）
+    static func writeToFile(_ packet: ExportPacket) throws -> URL {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(packet)
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("stock_backup_\(Self.stamp()).json")
+        try data.write(to: url)
+        return url
+    }
+
+    static func `import`(from url: URL, context: ModelContext) throws {
+        let data = try Data(contentsOf: url)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let packet = try decoder.decode(ExportPacket.self, from: data)
+
+        let existingSKUIds = Set((try context.fetch(FetchDescriptor<RawMaterialSKU>())).map { $0.skuId })
+        let existingBatchIds = Set((try context.fetch(FetchDescriptor<StockBatch>())).map { $0.batchId })
+        let existingInvIds = Set((try context.fetch(FetchDescriptor<StockInventory>())).map { $0.inventoryId })
+        let existingOrderIds = Set((try context.fetch(FetchDescriptor<StockOrderHeader>())).map { $0.orderId })
+
+        // 1. SKU + 包装 + 特征样本
+        for s in packet.skus where !existingSKUIds.contains(s.skuId) {
+            let sku = RawMaterialSKU(skuId: s.skuId, skuCode: s.skuCode, skuName: s.skuName,
+                                     categoryName: s.categoryName, baseUnit: s.baseUnit,
+                                     shelfLifeDays: s.shelfLifeDays)
+            sku.createdAt = s.createdAt
+            context.insert(sku)
+            for u in s.packagingUnits {
+                context.insert(PackagingUnit(unitId: u.unitId, unitName: u.unitName,
+                                             unitType: u.unitType, conversionRatio: u.conversionRatio,
+                                             barcode: u.barcode, sku: sku))
+            }
+            for f in s.featureSamples {
+                context.insert(FeatureSample(sampleId: f.sampleId, angleTag: f.angleTag,
+                                             ocrTextContent: f.ocrTextContent,
+                                             sampleImagePath: f.sampleImagePath, sku: sku))
+            }
+        }
+
+        // 2. 批次（按 skuCode 关联）
+        let skuByCode = try fetchMap(RawMaterialSKU.self, context: context) { $0.skuCode }
+        for b in packet.batches where !existingBatchIds.contains(b.batchId) {
+            let batch = StockBatch(batchId: b.batchId, batchNo: b.batchNo,
+                                   productionDate: b.productionDate, expirationDate: b.expirationDate,
+                                   supplierName: b.supplierName, inboundPrice: b.inboundPrice,
+                                   sku: skuByCode[b.skuCode])
+            context.insert(batch)
+        }
+
+        // 3. 库存台账（按 skuCode + batchNo 关联）
+        let batchByNo = try fetchMap(StockBatch.self, context: context) { $0.batchNo }
+        for inv in packet.inventories where !existingInvIds.contains(inv.inventoryId) {
+            let entity = StockInventory(inventoryId: inv.inventoryId, locationName: inv.locationName,
+                                        qtyBaseUnit: inv.qtyBaseUnit,
+                                        sku: skuByCode[inv.skuCode],
+                                        batch: inv.batchNo.flatMap { batchByNo[$0] })
+            entity.updatedAt = inv.updatedAt
+            context.insert(entity)
+        }
+
+        // 4. 单据（按 skuCode / unitId / batchNo 关联）
+        let unitById = try fetchMap(PackagingUnit.self, context: context) { $0.unitId }
+        for o in packet.orders where !existingOrderIds.contains(o.orderId) {
+            let header = StockOrderHeader(orderId: o.orderId, orderNo: o.orderNo,
+                                          orderType: o.orderType, remark: o.remark)
+            header.createdAt = o.createdAt
+            context.insert(header)
+            for it in o.items {
+                context.insert(StockOrderItem(itemId: it.itemId, operatingQty: it.operatingQty,
+                                              conversionRatio: it.conversionRatio,
+                                              totalBaseQty: it.totalBaseQty,
+                                              recognitionMode: it.recognitionMode,
+                                              confidenceScore: it.confidenceScore,
+                                              header: header,
+                                              sku: skuByCode[it.skuCode],
+                                              unit: it.unitId.flatMap { unitById[$0] },
+                                              batch: it.batchNo.flatMap { batchByNo[$0] }))
+            }
+        }
+        try context.save()
+    }
+
+    // MARK: - 内部辅助
+    private static func fetchMap<T: PersistentModel>(_ type: T.Type, context: ModelContext,
+                                                     key: (T) -> String) throws -> [String: T] {
+        Dictionary(uniqueKeysWithValues: try context.fetch(FetchDescriptor<T>()).map { (key($0), $0) })
+    }
+
+    private static func stamp() -> String {
+        let df = DateFormatter(); df.dateFormat = "yyyyMMddHHmmss"; return df.string(from: Date())
+    }
+}

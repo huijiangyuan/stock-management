@@ -1,0 +1,17 @@
+# ── Xcode / XcodeGen 生成物（源码用 project.yml，CI 里 xcodegen generate）──
+ios-app/build/
+ios-app/*.xcodeproj
+ios-app/*.xcworkspace
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# ── 本地产物（非源码）──
+.DS_Store
+deliverables/
+.workbuddy/
+
+# ── 通用 ──
+*.log
+.env
