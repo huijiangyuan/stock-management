@@ -22,6 +22,15 @@ struct OrderCreateView: View {
     @State private var learnBarcode: String? = nil
     @State private var lastMode: RecognitionMode = .manual
 
+    // AI 视觉识别相关
+    @State private var showCamera = false
+    @State private var visionBusy = false
+    @State private var showVisionConfirm = false
+    @State private var visionImageData: Data?
+    @State private var visionResultName: String?
+    @State private var visionConfidence: Double = 0
+    @State private var visionMessage: String?
+
     // 入库批次字段
     @State private var batchNo = ""
     @State private var productionDate = Date()
@@ -85,6 +94,10 @@ struct OrderCreateView: View {
                     Button { showScanner = true } label: {
                         Label("扫码识别", systemImage: "barcode.viewfinder")
                     }
+                    Button { showCamera = true } label: {
+                        Label("AI 识别（拍照）", systemImage: "camera.viewfinder")
+                    }
+                    .disabled(VisionSettings.shared.localOnly || visionBusy)
                 }
 
                 if selectedSKU != nil {
@@ -127,6 +140,11 @@ struct OrderCreateView: View {
             .sheet(isPresented: $showScanner) {
                 BarcodeScannerView { code in handleScanned(code) }
             }
+            .sheet(isPresented: $showCamera) {
+                CameraCaptureView { data in
+                    Task { await runVision(data) }
+                }
+            }
             .sheet(isPresented: $showLearn) {
                 SKUFormView(initialBarcode: learnBarcode)
             }
@@ -149,6 +167,16 @@ struct OrderCreateView: View {
                 let skipped = inStockBatches.prefix(while: { $0.batchId != (pendingBatch?.batchId ?? "") })
                                           .map { $0.batchNo }
                 Text("所选批次并非最早可出库批次，将跳过更早批次：\(skipped.joined(separator: "、"))。是否仍按该批次出库？")
+            }
+            .alert("AI 识别结果", isPresented: $showVisionConfirm) {
+                Button("采用", role: .cancel) {}
+                Button("重拍", role: .destructive) { showCamera = true }
+            } message: {
+                if let name = visionResultName {
+                    Text("识别为「\(name)」，置信度 \(Int(visionConfidence * 100))%。请确认无误后生成单据；若不准可重拍或手动选择。")
+                } else {
+                    Text("未能识别，请重拍或改用扫码 / 手动。")
+                }
             }
         }
     }
@@ -189,14 +217,16 @@ struct OrderCreateView: View {
     }
 
     private func handleScanned(_ code: String) {
-        lastMode = .barcode
-        let result = BarcodeEngine().recognize(RecognitionInput(barcode: code), context: ctx)
-        if let sku = result.sku {
-            selectedSKU = sku
-            selectedUnit = result.packagingUnit ?? sku.packagingUnits.first
-        } else {
-            learnBarcode = code
-            showLearn = true
+        Task { @MainActor in
+            lastMode = .barcode
+            let result = await BarcodeEngine().recognize(RecognitionInput(barcode: code), context: ctx)
+            if let sku = result.sku {
+                selectedSKU = sku
+                selectedUnit = result.packagingUnit ?? sku.packagingUnits.first
+            } else {
+                learnBarcode = code
+                showLearn = true
+            }
         }
     }
 
@@ -217,10 +247,51 @@ struct OrderCreateView: View {
             batch = selectedBatch
         }
 
+        if lastMode == .vision, let img = visionImageData {
+            saveFeatureSample(image: img, sku: sku, unit: unit, name: visionResultName)
+        }
         let line = InventoryStore.OrderLine(sku: sku, unit: unit, batch: batch,
                                             operatingQty: qty, conversionRatio: unit.conversionRatio,
                                             mode: lastMode, note: fifoOverrideNote)
         try? store.processOrder(type: orderType, lines: [line], location: location)
+    }
+
+    // MARK: - AI 视觉识别流程
+    private func runVision(_ data: Data) async {
+        visionBusy = true
+        visionImageData = data
+        let result = await CloudVisionEngine().recognize(RecognitionInput(visionImage: data), context: ctx)
+        visionBusy = false
+        applyVision(result)
+    }
+
+    private func applyVision(_ result: RecognitionResult) {
+        if let sku = result.sku {
+            selectedSKU = sku
+            selectedUnit = result.packagingUnit ?? sku.packagingUnits.first
+            if let pd = result.productionDate { productionDate = pd }
+            if let ed = result.expirationDate { expirationDate = ed }
+            lastMode = .vision
+            visionResultName = result.recognizedName
+            visionConfidence = result.confidence
+            showVisionConfirm = true
+        } else {
+            visionMessage = "未匹配到本地 SKU：请先手动建库，或改用扫码 / 手动。"
+        }
+    }
+
+    /// 识别确认入库后沉淀特征样本（为后续端侧向量比对攒数据）
+    private func saveFeatureSample(image: Data, sku: RawMaterialSKU, unit: PackagingUnit?, name: String?) {
+        let fm = FileManager.default
+        let dir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("feature_samples", isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let path = dir.appendingPathComponent("\(UUID().uuidString).jpg")
+        try? image.write(to: path)
+        let sample = FeatureSample(angleTag: "FRONT", ocrTextContent: name,
+                                   sampleImagePath: path.path, unit: unit, sku: sku)
+        ctx.insert(sample)
+        try? ctx.save()
     }
 
     static func autoBatchNo(_ sku: RawMaterialSKU) -> String {

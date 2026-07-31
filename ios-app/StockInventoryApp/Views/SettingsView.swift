@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+import Observation
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var ctx
@@ -8,9 +9,33 @@ struct SettingsView: View {
     @State private var showImport = false
     @State private var message: String?
 
+    @State private var keyText: String = VisionSettings.shared.apiKey ?? ""
+    @State private var showPrivacy = false
+
     var body: some View {
         NavigationStack {
             Form {
+                Section("AI 视觉识别（云端 VLM）") {
+                    Picker("服务商", selection: providerBinding) {
+                        Text("DashScope 通义千问（中国境内）").tag(VisionSettings.Provider.dashscope)
+                        Text("Anthropic Claude（美国 · 出境）").tag(VisionSettings.Provider.anthropic)
+                    }
+                    if VisionSettings.shared.isCrossBorder {
+                        Text("⚠️ 选择此项后，拍摄的图片将传至美国服务器，触发个人信息出境合规义务。")
+                            .font(.caption).foregroundColor(.danger)
+                    }
+                    SecureField("API Key", text: $keyText)
+                        .onChange(of: keyText) { VisionSettings.shared.apiKey = $0 }
+                    TextField("模型名（可选）", text: modelBinding)
+                    TextField("BaseURL（可选）", text: baseURLBinding)
+                    Toggle("仅本地 / 不上云", isOn: localOnlyBinding)
+                    Text("关闭后视觉识别禁用，降级为条码 / 手动。端侧向量比对引擎尚未实现，当前无本地 AI 兜底。")
+                        .font(.caption).foregroundColor(.secondary)
+                    Button { showPrivacy = true } label: {
+                        Label("隐私政策与数据共享说明", systemImage: "hand.raised.fill")
+                    }
+                }
+
                 Section("数据备份与恢复（离线）") {
                     Button { doExport() } label: {
                         Label("导出数据包 (JSON)", systemImage: "square.and.arrow.up")
@@ -23,7 +48,7 @@ struct SettingsView: View {
                 }
                 Section("关于") {
                     Text("纯离线餐饮原材料库存管理")
-                    Text("本地 SQLite 存储 · 零后端依赖 · 需 iOS 17+")
+                    Text("本地 SQLite 存储 · 零后端依赖 · 需 iOS 17+。视觉 AI 识别为可选云端能力，开启「仅本地」即为纯本地运行；端侧向量比对暂未实现。")
                         .font(.caption).foregroundColor(.secondary)
                 }
                 if let m = message {
@@ -40,7 +65,29 @@ struct SettingsView: View {
             .sheet(isPresented: $showImport) {
                 ImportPicker { url in doImport(url) }
             }
+            .alert("隐私政策与数据共享说明", isPresented: $showPrivacy) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text("本 App 默认纯本地运行，不向任何第三方发送数据。仅当你配置并启用「AI 视觉识别」时，拍摄的图片与提示词会发送至你选择的服务商：DashScope（阿里云，数据存储于中国境内）或 Anthropic（数据存储于美国）。我们仅发送识别所需的最小图像与文本，不保留你的 API Key 之外的个人信息。你随时可在设置中关闭该功能。")
+            }
         }
+    }
+
+    private var providerBinding: Binding<VisionSettings.Provider> {
+        Binding(get: { VisionSettings.shared.provider },
+                set: { VisionSettings.shared.provider = $0 })
+    }
+    private var localOnlyBinding: Binding<Bool> {
+        Binding(get: { VisionSettings.shared.localOnly },
+                set: { VisionSettings.shared.localOnly = $0 })
+    }
+    private var modelBinding: Binding<String> {
+        Binding(get: { VisionSettings.shared.modelName ?? "" },
+                set: { VisionSettings.shared.modelName = $0.isEmpty ? nil : $0 })
+    }
+    private var baseURLBinding: Binding<String> {
+        Binding(get: { VisionSettings.shared.baseURL ?? "" },
+                set: { VisionSettings.shared.baseURL = $0.isEmpty ? nil : $0 })
     }
 
     private func doExport() {

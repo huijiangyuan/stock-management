@@ -5,25 +5,49 @@ import SwiftData
 enum RecognitionMode: String, Codable {
     case barcode = "BARCODE"
     case manual = "MANUAL"
+    case vision = "VISION"
 }
 
 /// 识别输入（不同引擎取不同字段）
 struct RecognitionInput {
     var barcode: String?
     var manualSkuCode: String?
+    var visionImage: Data?   // 摄像头拍照 JPEG
 }
 
-/// 识别结果（纯本地解析，无云端调用）
+/// 识别结果。视觉识别会带回 recognizedName / 生产日期 / 到期日，供入库单预填。
 struct RecognitionResult {
     var sku: RawMaterialSKU?
     var packagingUnit: PackagingUnit?
     var confidence: Double
     var mode: RecognitionMode
-    var needsLearning: Bool      // true 表示本地未命中，需员工建库/确认
+    var needsLearning: Bool
+    var recognizedName: String?
+    var productionDate: Date?
+    var expirationDate: Date?
+
+    init(sku: RawMaterialSKU? = nil,
+         packagingUnit: PackagingUnit? = nil,
+         confidence: Double,
+         mode: RecognitionMode,
+         needsLearning: Bool,
+         recognizedName: String? = nil,
+         productionDate: Date? = nil,
+         expirationDate: Date? = nil) {
+        self.sku = sku
+        self.packagingUnit = packagingUnit
+        self.confidence = confidence
+        self.mode = mode
+        self.needsLearning = needsLearning
+        self.recognizedName = recognizedName
+        self.productionDate = productionDate
+        self.expirationDate = expirationDate
+    }
 }
 
-/// 可插拔识别引擎协议。后续可新增 OnDeviceVLMEngine / EmbeddingEngine 实现，业务层无感知。
+/// 可插拔识别引擎协议。条码 / 手动 / 视觉（云端 VLM）统一走 recognize。
+/// 视觉识别必须异步（网络调用），故协议方法为 async。
 protocol RecognitionEngine {
     var mode: RecognitionMode { get }
-    func recognize(_ input: RecognitionInput, context: ModelContext) -> RecognitionResult
+    func recognize(_ input: RecognitionInput, context: ModelContext) async -> RecognitionResult
 }

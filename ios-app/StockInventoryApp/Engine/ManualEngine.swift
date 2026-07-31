@@ -5,7 +5,7 @@ import SwiftData
 struct ManualEngine: RecognitionEngine {
     let mode: RecognitionMode = .manual
 
-    func recognize(_ input: RecognitionInput, context: ModelContext) -> RecognitionResult {
+    func recognize(_ input: RecognitionInput, context: ModelContext) async -> RecognitionResult {
         if let code = input.manualSkuCode, !code.isEmpty {
             let descriptor = FetchDescriptor<RawMaterialSKU>(
                 predicate: #Predicate { $0.skuCode == code }

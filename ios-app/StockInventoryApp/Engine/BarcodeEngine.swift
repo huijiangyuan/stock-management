@@ -6,7 +6,7 @@ import SwiftData
 struct BarcodeEngine: RecognitionEngine {
     let mode: RecognitionMode = .barcode
 
-    func recognize(_ input: RecognitionInput, context: ModelContext) -> RecognitionResult {
+    func recognize(_ input: RecognitionInput, context: ModelContext) async -> RecognitionResult {
         guard let barcode = input.barcode, !barcode.isEmpty else {
             return RecognitionResult(sku: nil, packagingUnit: nil, confidence: 0,
                                      mode: .barcode, needsLearning: true)
