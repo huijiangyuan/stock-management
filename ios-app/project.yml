@@ -10,12 +10,7 @@ targets:
     sources:
       - path: StockInventoryApp
     info:
-      properties:
-        NSCameraUsageDescription: "用于扫描原材料包装条码，快速识别商品并自动完成出入库记账"
-        UILaunchScreen: {}
-        CFBundleDisplayName: "库存管理"
-        UIApplicationSceneManifest:
-          UIApplicationSupportsMultipleScenes: false
+      path: StockInventoryApp/Info.plist
 schemes:
   StockInventoryApp:
     build:
