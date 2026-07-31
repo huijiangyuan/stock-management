@@ -114,27 +114,7 @@ struct OrderCreateView: View {
                             TextField("入库单价", text: $inboundPrice).keyboardType(.decimalPad)
                         }
                     } else {
-                        Section("选择批次（FIFO 优先）") {
-                            if inStockBatches.isEmpty {
-                                Text("该原材料无在库批次").font(.subheadline).foregroundColor(.secondary)
-                            }
-                            ForEach(inStockBatches) { b in
-                                BatchPickRow(batch: b,
-                                             selected: selectedBatch?.batchId == b.batchId,
-                                             isEarliest: b.batchId == inStockBatches.first?.batchId)
-                                    .contentShape(Rect())
-                                    .onTapGesture {
-                                        let earliest = inStockBatches.first
-                                        if b.batchId == earliest?.batchId {
-                                            selectedBatch = b
-                                        } else {
-                                            pendingBatch = b
-                                            showFIFOAlert = true
-                                        }
-                                    }
-                            }
-                            .onAppear { if selectedBatch == nil { selectedBatch = inStockBatches.first } }
-                        }
+                        batchSection
                     }
                 }
             }
@@ -183,6 +163,31 @@ struct OrderCreateView: View {
         return true
     }
 
+    /// 出库 / 盘点时按 FIFO 选择批次：最早批次可直接选，非最早需二次确认覆盖。
+    private var batchSection: some View {
+        Section("选择批次（FIFO 优先）") {
+            if inStockBatches.isEmpty {
+                Text("无可用批次").foregroundColor(.secondary)
+            } else {
+                ForEach(inStockBatches) { batch in
+                    Button {
+                        if inStockBatches.first?.batchId == batch.batchId {
+                            selectedBatch = batch
+                        } else {
+                            pendingBatch = batch
+                            showFIFOAlert = true
+                        }
+                    } label: {
+                        BatchPickRow(batch: batch,
+                                     selected: selectedBatch?.batchId == batch.batchId,
+                                     isEarliest: inStockBatches.first?.batchId == batch.batchId)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
     private func handleScanned(_ code: String) {
         lastMode = .barcode
         let result = BarcodeEngine().recognize(RecognitionInput(barcode: code), context: ctx)
@@ -202,11 +207,12 @@ struct OrderCreateView: View {
 
         var batch: StockBatch? = nil
         if orderType == "INBOUND" {
-            batch = StockBatch(batchNo: batchNo.isEmpty ? Self.autoBatchNo(sku) : batchNo,
+            let newBatch = StockBatch(batchNo: batchNo.isEmpty ? Self.autoBatchNo(sku) : batchNo,
                                productionDate: productionDate, expirationDate: expirationDate,
                                supplierName: supplier.isEmpty ? nil : supplier,
                                inboundPrice: Double(inboundPrice), sku: sku)
-            ctx.insert(batch)
+            ctx.insert(newBatch)
+            batch = newBatch
         } else {
             batch = selectedBatch
         }

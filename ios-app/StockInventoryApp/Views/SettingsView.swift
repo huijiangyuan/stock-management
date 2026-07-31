@@ -31,7 +31,12 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("设置")
-            .sheet(item: $shareURL) { url in ShareSheet(url: url) }
+            .sheet(isPresented: Binding(
+                get: { shareURL != nil },
+                set: { if !$0 { shareURL = nil } }
+            )) {
+                if let url = shareURL { ShareSheet(url: url) }
+            }
             .sheet(isPresented: $showImport) {
                 ImportPicker { url in doImport(url) }
             }

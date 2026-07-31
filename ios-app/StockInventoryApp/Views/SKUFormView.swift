@@ -18,11 +18,11 @@ struct SKUFormView: View {
 
     struct PackagingUnitDraft: Identifiable {
         var id = UUID().uuidString
-        var unitId: String?
+        var unitId: String? = nil
         var unitName: String
         var unitType: String
         var conversionRatio: String
-        var barcode: String
+        var barcode: String = ""
     }
 
     var body: some View {
