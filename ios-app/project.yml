@@ -9,9 +9,12 @@ targets:
     platform: iOS
     sources:
       - path: StockInventoryApp
-      # llama.cpp-omni 推理框架：CI / 本地由 scripts/build_xcframework.sh 生成到
-      # ios-app/Frameworks/llama.xcframework。放在 app 源码树之外，避免被 sources glob 吞掉。
-      - path: Frameworks/llama.xcframework
+    # 预构建的 llama.cpp-omni 推理框架（CI / 本地由 scripts/build_xcframework.sh 生成）。
+    # 必须用 dependencies.framework 方式声明，XcodeGen 才会同时 link + embed；
+    # 若仅放进 sources，只会被 copy/embed，不会往链接器传 -framework llama，
+    # 导致 mb_mtmd_* / mtmd_* 等符号 undefined。
+    dependencies:
+      - framework: Frameworks/llama.xcframework
         embed: true
     info:
       path: StockInventoryApp/Info.plist
