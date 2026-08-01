@@ -85,10 +85,14 @@ final class ModelManager {
     }
 
     init() {
-        let cfg = URLSessionConfiguration.default
-        cfg.timeoutIntervalForRequest = 60
-        cfg.timeoutIntervalForResource = 900
+        // 后台会话：1.6GB 模型下载在 App 被 LiveContainer/系统挂起时仍能续传并存活，
+        // 避免前台 default 会话被挂起即中断、临时文件永远搬不到 Documents。
+        let cfg = URLSessionConfiguration.background(withIdentifier: "com.stockmgmt.modeldownload")
+        cfg.isDiscretionary = false
+        cfg.sessionSendsLaunchEvents = true
         cfg.waitsForConnectivity = true
+        cfg.timeoutIntervalForRequest = 60
+        cfg.timeoutIntervalForResource = 3600
         session = URLSession(configuration: cfg, delegate: DownloadDelegate(manager: self), delegateQueue: nil)
         Task { await refreshPresence() }
     }
@@ -361,5 +365,11 @@ private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         Task { @MainActor in self.manager?.didComplete(task: task, error: error) }
+    }
+
+    /// 后台会话全部事件结束后系统回调（App 曾被挂起后由系统唤醒时）。
+    /// 本 App 的完成逻辑已在 didCompleteWithError 处理，这里无需额外动作。
+    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        // no-op：前台已通过 didCompleteWithError 完成文件落地与状态更新
     }
 }
