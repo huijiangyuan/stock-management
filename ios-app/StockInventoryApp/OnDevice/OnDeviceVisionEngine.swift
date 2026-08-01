@@ -31,8 +31,8 @@ final class OnDeviceVisionEngine: ObservableObject {
     @Published var loadSuccess: Bool = false
     @Published var errorMessage: String = ""
 
-    /// 模型文件名常量（与 MiniCPM-V-Apps 保持一致）
-    static let modelFileName = "ggml-model-Q4_0.gguf"
+    /// 模型文件名常量（MiniCPM-V 4.6 官方实际文件名）
+    static let modelFileName = "MiniCPM-V-4_6-Q4_K_M.gguf"
     static let mmprojFileName = "mmproj-model-f16.gguf"
 
     // MARK: - Prompt

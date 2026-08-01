@@ -97,7 +97,7 @@ struct OrderCreateView: View {
                     Button { showCamera = true } label: {
                         Label("AI 识别（拍照）", systemImage: "camera.viewfinder")
                     }
-                    .disabled(VisionSettings.shared.localOnly || visionBusy)
+                    .disabled(visionBusy)
                 }
 
                 if selectedSKU != nil {
@@ -256,13 +256,45 @@ struct OrderCreateView: View {
         try? store.processOrder(type: orderType, lines: [line], location: location)
     }
 
-    // MARK: - AI 视觉识别流程
+    // MARK: - AI 视觉识别流程（三档：端侧优先 → 云端兜底 → 引导手动）
+
     private func runVision(_ data: Data) async {
         visionBusy = true
         visionImageData = data
-        let result = await CloudVisionEngine().recognize(RecognitionInput(visionImage: data), context: ctx)
+        let result = await resolveAndRecognize(data)
         visionBusy = false
         applyVision(result)
+    }
+
+    /// 按设置解析可用引擎：端侧优先（或云端不可用时）走本地 MiniCPM-V 4.6；
+    /// 否则回退云端 VLM；两者皆不可用时给出引导，绝不阻塞用户。
+    private func resolveAndRecognize(_ data: Data) async -> RecognitionResult {
+        let prefer = VisionSettings.shared.preferOnDevice
+        let cloudReady = VisionSettings.shared.cloudReady
+
+        if prefer {
+            if !OnDeviceVisionEngine.shared.loadSuccess {
+                await ModelManager.shared.ensureLoaded()
+            }
+            if OnDeviceVisionEngine.shared.loadSuccess {
+                return await OnDeviceVisionEngine.shared.recognize(imageData: data)
+            }
+            if cloudReady {
+                return await CloudVisionEngine().recognize(RecognitionInput(visionImage: data), context: ctx)
+            }
+        } else {
+            if cloudReady {
+                return await CloudVisionEngine().recognize(RecognitionInput(visionImage: data), context: ctx)
+            }
+            if !OnDeviceVisionEngine.shared.loadSuccess {
+                await ModelManager.shared.ensureLoaded()
+            }
+            if OnDeviceVisionEngine.shared.loadSuccess {
+                return await OnDeviceVisionEngine.shared.recognize(imageData: data)
+            }
+        }
+        visionMessage = "无可用的视觉识别：请先到「设置 → 端侧模型管理」下载 MiniCPM-V 4.6，或在设置中配置云端 VLM API Key。"
+        return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true)
     }
 
     private func applyVision(_ result: RecognitionResult) {
@@ -275,8 +307,31 @@ struct OrderCreateView: View {
             visionResultName = result.recognizedName
             visionConfidence = result.confidence
             showVisionConfirm = true
-        } else {
-            visionMessage = "未匹配到本地 SKU：请先手动建库，或改用扫码 / 手动。"
+            return
+        }
+        // 无精确 SKU 命中：尝试按名称模糊匹配本地已有原材料
+        if let name = result.recognizedName, let sku = matchSKU(by: name) {
+            selectedSKU = sku
+            selectedUnit = sku.packagingUnits.first
+            if let pd = result.productionDate { productionDate = pd }
+            if let ed = result.expirationDate { expirationDate = ed }
+            lastMode = .vision
+            visionResultName = name
+            visionConfidence = result.confidence
+            showVisionConfirm = true
+            return
+        }
+        visionMessage = "未匹配到本地 SKU：请先手动建库，或改用扫码 / 手动。"
+    }
+
+    /// 按识别出的名称模糊匹配本地原材料（名称互含即命中）。
+    private func matchSKU(by name: String) -> RawMaterialSKU? {
+        let q = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return nil }
+        let all = (try? ctx.fetch(FetchDescriptor<RawMaterialSKU>())) ?? []
+        return all.first { sku in
+            sku.skuName.localizedCaseInsensitiveContains(q) ||
+            q.localizedCaseInsensitiveContains(sku.skuName)
         }
     }
 

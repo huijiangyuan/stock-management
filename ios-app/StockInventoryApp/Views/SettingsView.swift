@@ -29,11 +29,22 @@ struct SettingsView: View {
                     TextField("模型名（可选）", text: modelBinding)
                     TextField("BaseURL（可选）", text: baseURLBinding)
                     Toggle("仅本地 / 不上云", isOn: localOnlyBinding)
-                    Text("关闭后视觉识别禁用，降级为条码 / 手动。端侧向量比对引擎尚未实现，当前无本地 AI 兜底。")
+                    Text("开启后禁用云端 VLM，仅使用本机端侧 MiniCPM-V 4.6 推理（需先到下方「模型管理」下载模型，识别数据不出设备）。")
                         .font(.caption).foregroundColor(.secondary)
                     Button { showPrivacy = true } label: {
                         Label("隐私政策与数据共享说明", systemImage: "hand.raised.fill")
                     }
+                }
+
+                Section("端侧 AI 模型（MiniCPM-V 4.6）") {
+                    NavigationLink {
+                        ModelManagerView()
+                    } label: {
+                        Label("模型管理（下载 / 加载）", systemImage: "cpu")
+                    }
+                    Toggle("优先端侧识别", isOn: preferOnDeviceBinding)
+                    Text("默认开启：端侧模型就绪时优先本地推理，识别数据不出设备；否则回退云端 VLM。关闭则优先云端。")
+                        .font(.caption).foregroundColor(.secondary)
                 }
 
                 Section("数据备份与恢复（离线）") {
@@ -48,7 +59,7 @@ struct SettingsView: View {
                 }
                 Section("关于") {
                     Text("纯离线餐饮原材料库存管理")
-                    Text("本地 SQLite 存储 · 零后端依赖 · 需 iOS 17+。视觉 AI 识别为可选云端能力，开启「仅本地」即为纯本地运行；端侧向量比对暂未实现。")
+                    Text("本地 SQLite 存储 · 零后端依赖 · 需 iOS 17+。支持端侧 MiniCPM-V 4.6 本地推理与可选云端 VLM 兜底，识别数据默认不出设备。")
                         .font(.caption).foregroundColor(.secondary)
                 }
                 if let m = message {
@@ -80,6 +91,10 @@ struct SettingsView: View {
     private var localOnlyBinding: Binding<Bool> {
         Binding(get: { VisionSettings.shared.localOnly },
                 set: { VisionSettings.shared.localOnly = $0 })
+    }
+    private var preferOnDeviceBinding: Binding<Bool> {
+        Binding(get: { VisionSettings.shared.preferOnDevice },
+                set: { VisionSettings.shared.preferOnDevice = $0 })
     }
     private var modelBinding: Binding<String> {
         Binding(get: { VisionSettings.shared.modelName ?? "" },

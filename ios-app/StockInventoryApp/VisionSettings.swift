@@ -23,6 +23,18 @@ final class VisionSettings {
         set { UserDefaults.standard.set(newValue, forKey: "vision_local_only") }
     }
 
+    /// 优先端侧识别：默认 true。开启时若端侧模型可用则优先本地推理，否则回退云端 VLM；
+    /// 关闭时优先走云端 VLM（需配置 API Key），端侧作为兜底。永不阻塞用户。
+    var preferOnDevice: Bool {
+        get { UserDefaults.standard.object(forKey: "vision_prefer_ondevice") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "vision_prefer_ondevice") }
+    }
+
+    /// 云端 VLM 是否已可用（未开 localOnly 且已配置 API Key）
+    var cloudReady: Bool {
+        !localOnly && (apiKey?.isEmpty == false)
+    }
+
     var modelName: String? {
         get { UserDefaults.standard.string(forKey: "vision_model") }
         set { UserDefaults.standard.set(newValue, forKey: "vision_model") }
