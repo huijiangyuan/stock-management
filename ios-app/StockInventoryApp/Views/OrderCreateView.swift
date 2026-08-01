@@ -30,6 +30,8 @@ struct OrderCreateView: View {
     @State private var visionResultName: String?
     @State private var visionConfidence: Double = 0
     @State private var visionMessage: String?
+    /// 端侧/云端均不可用时，引导文案的 alert 开关（visionMessage 原本是死代码，无 UI 出口）。
+    @State private var showVisionMsg = false
 
     // 入库批次字段
     @State private var batchNo = ""
@@ -178,6 +180,11 @@ struct OrderCreateView: View {
                     Text("未能识别，请重拍或改用扫码 / 手动。")
                 }
             }
+            .alert("提示", isPresented: $showVisionMsg) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text(visionMessage ?? "")
+            }
         }
     }
 
@@ -258,6 +265,7 @@ struct OrderCreateView: View {
 
     // MARK: - AI 视觉识别流程（三档：端侧优先 → 云端兜底 → 引导手动）
 
+    @MainActor
     private func runVision(_ data: Data) async {
         visionBusy = true
         visionImageData = data
@@ -268,35 +276,36 @@ struct OrderCreateView: View {
 
     /// 按设置解析可用引擎：端侧优先（或云端不可用时）走本地 MiniCPM-V 4.6；
     /// 否则回退云端 VLM；两者皆不可用时给出引导，绝不阻塞用户。
+    @MainActor
     private func resolveAndRecognize(_ data: Data) async -> RecognitionResult {
         let prefer = VisionSettings.shared.preferOnDevice
         let cloudReady = VisionSettings.shared.cloudReady
 
-        if prefer {
-            if !OnDeviceVisionEngine.shared.loadSuccess {
-                await ModelManager.shared.ensureLoaded()
-            }
-            if OnDeviceVisionEngine.shared.loadSuccess {
-                return await OnDeviceVisionEngine.shared.recognize(imageData: data)
-            }
-            if cloudReady {
-                return await CloudVisionEngine().recognize(RecognitionInput(visionImage: data), context: ctx)
-            }
-        } else {
-            if cloudReady {
-                return await CloudVisionEngine().recognize(RecognitionInput(visionImage: data), context: ctx)
-            }
-            if !OnDeviceVisionEngine.shared.loadSuccess {
-                await ModelManager.shared.ensureLoaded()
-            }
-            if OnDeviceVisionEngine.shared.loadSuccess {
-                return await OnDeviceVisionEngine.shared.recognize(imageData: data)
-            }
+        // 端侧优先路径：偏好端侧且尚未加载时，先尝试加载。load 内部有环境护栏，
+        // 不安全环境会直接兜底、不会进入 C 层，因此这里调用是安全的。
+        if prefer && !OnDeviceVisionEngine.shared.loadSuccess {
+            await ModelManager.shared.ensureLoaded()
         }
-        visionMessage = "无可用的视觉识别：请先到「设置 → 端侧模型管理」下载 MiniCPM-V 4.6，或在设置中配置云端 VLM API Key。"
+        let onDevice = OnDeviceVisionEngine.shared.onDeviceUsable
+
+        if prefer {
+            if onDevice { return await OnDeviceVisionEngine.shared.recognize(imageData: data) }
+            if cloudReady { return await CloudVisionEngine().recognize(RecognitionInput(visionImage: data), context: ctx) }
+        } else {
+            if cloudReady { return await CloudVisionEngine().recognize(RecognitionInput(visionImage: data), context: ctx) }
+            if onDevice { return await OnDeviceVisionEngine.shared.recognize(imageData: data) }
+        }
+
+        // 两端皆不可用：给出明确、不闪退的引导（含环境准入原因）。
+        let extra = OnDeviceVisionEngine.shared.unavailableReason.isEmpty
+            ? ""
+            : "\n（\(OnDeviceVisionEngine.shared.unavailableReason)）"
+        visionMessage = "无可用的视觉识别：请先下载 MiniCPM-V 4.6，或在设置配置云端 VLM。\(extra)"
+        showVisionMsg = true
         return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true)
     }
 
+    @MainActor
     private func applyVision(_ result: RecognitionResult) {
         if let sku = result.sku {
             selectedSKU = sku
@@ -322,6 +331,7 @@ struct OrderCreateView: View {
             return
         }
         visionMessage = "未匹配到本地 SKU：请先手动建库，或改用扫码 / 手动。"
+        showVisionMsg = true
     }
 
     /// 按识别出的名称模糊匹配本地原材料（名称互含即命中）。

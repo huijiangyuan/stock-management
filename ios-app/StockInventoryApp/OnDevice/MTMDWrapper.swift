@@ -283,14 +283,20 @@ public class MTMDWrapper: ObservableObject {
         }
         
         updateGenerationState(.generating)
-        
+
         // 取消之前的生成任务
         generationTask?.cancel()
-        
-        // 创建新的生成任务
-        generationTask = Task {
+
+        // 创建新的生成任务并 await 其完成：让 recognize 在 startGeneration 返回时
+        // wrapper.fullOutput 已填好，从而能正确 parseResult（修复"安全环境也返回
+        // 空结果"）。performGeneration 内部是 while !Task.isCancelled 循环直到 is_end
+        // 才 return，且每次 mb_mtmd_loop 前后都有 Task.sleep 挂起点，await 是安全的；
+        // 重活（mb_mtmd_loop 的 C 调用）实际跑在后台全局队列，不会阻塞主线程。
+        let task = Task {
             await performGeneration()
         }
+        generationTask = task
+        await task.value
     }
     
     /// 停止生成

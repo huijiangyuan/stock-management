@@ -19,7 +19,9 @@ struct CameraCaptureView: UIViewControllerRepresentable {
         init(_ p: CameraCaptureView) { self.parent = p }
         func didCapture(_ data: Data) {
             parent.onCaptured(data)
-            parent.dismiss()
+            // photoOutput 回调可能不在主线程；dismiss 必须在主线程，否则触发
+            // UIKit 主线程违规 / 潜在崩溃。
+            DispatchQueue.main.async { parent.dismiss() }
         }
     }
 }

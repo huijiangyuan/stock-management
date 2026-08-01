@@ -30,6 +30,11 @@ final class OnDeviceVisionEngine: ObservableObject {
     @Published var isGenerating: Bool = false
     @Published var loadSuccess: Bool = false
     @Published var errorMessage: String = ""
+    /// 端侧不可用的引导原因（环境准入护栏命中时填写，供 UI 透出）。
+    @Published var unavailableReason: String = ""
+
+    /// 端侧引擎当前是否可用：已加载且环境准入通过。供识别流程决策用。
+    var onDeviceUsable: Bool { loadSuccess && unavailableReason.isEmpty }
 
     /// 模型文件名常量（MiniCPM-V 4.6 官方实际文件名）
     static let modelFileName = "MiniCPM-V-4_6-Q4_K_M.gguf"
@@ -69,6 +74,14 @@ final class OnDeviceVisionEngine: ObservableObject {
 
     /// 用指定 GGUF + mmproj 路径初始化端侧模型。全进程仅一次。
     func load(modelPath: String, mmprojPath: String) async {
+        // 事前环境准入：不安全则绝不触碰 MTMDWrapper（C 层崩溃不可事后 catch）
+        let env = OnDeviceSafeEnvironment.evaluate()
+        guard env.safe else {
+            self.unavailableReason = env.reason
+            self.loadSuccess = false
+            errorMessage = env.reason
+            return
+        }
         do {
             let tier = DeviceMemoryTier.current
             let params = MTMDParams(
@@ -101,6 +114,17 @@ final class OnDeviceVisionEngine: ObservableObject {
             return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true,
                                       recognizedName: nil)
         }
+
+        // 二次护栏：recognition 入口再确认环境安全（loadSuccess 可能来自更早的
+        // 安全环境；运行期内存压力也可能使本机变为不安全）。不安全则直接兜底，
+        // 绝不触碰 wrapper，避免进入 C/Metal 层触发原生崩溃。
+        let env = OnDeviceSafeEnvironment.evaluate()
+        guard env.safe else {
+            self.unavailableReason = env.reason
+            return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true,
+                                      recognizedName: nil)
+        }
+
         guard let url = saveTempJPEG(imageData) else {
             return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true,
                                       recognizedName: nil)
@@ -116,7 +140,10 @@ final class OnDeviceVisionEngine: ObservableObject {
             return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true, recognizedName: nil)
         }
 
-        return Self.parseResult(outputText, imageData: imageData)
+        // 直接读 wrapper.fullOutput（源真相）：startGeneration 现已 await 到生成
+        // 结束，fullOutput 已在主线程填好。避免依赖 Combine sink → outputText 的
+        // 异步投递在 parse 时尚未到达，从而重蹈"安全环境也返回空结果"的覆辙。
+        return Self.parseResult(wrapper.fullOutput, imageData: imageData)
     }
 
     // MARK: - 解析
