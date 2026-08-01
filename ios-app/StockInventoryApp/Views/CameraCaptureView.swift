@@ -66,21 +66,37 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
 
     private func beginCapture() {
         guard session == nil else { return }
-        guard let device = AVCaptureDevice.default(for: .video),
-              let input = try? AVCaptureDeviceInput(device: device) else { return }
+        guard let device = AVCaptureDevice.default(for: .video) else {
+            showErrorAlert(title: "无法开启相机", message: "未检测到摄像头设备，请改用「扫码识别」或手动选择原材料。")
+            return
+        }
+        guard let input = AVCaptureDeviceInput(device: device) else {
+            showErrorAlert(title: "无法开启相机", message: "相机输入初始化失败，请重试或改用其他识别方式。")
+            return
+        }
         let session = AVCaptureSession()
         session.sessionPreset = .photo
-        session.addInput(input)
-        let output = AVCapturePhotoOutput()
-        session.addOutput(output)
-        self.session = session
-        self.output = output
-        let preview = AVCaptureVideoPreviewLayer(session: session)
-        preview.videoGravity = .resizeAspectFill
-        preview.frame = view.layer.bounds
-        view.layer.insertSublayer(preview, at: 0)
-        self.preview = preview
-        queue.async { session.startRunning() }
+        do {
+            session.addInput(input)
+            let output = AVCapturePhotoOutput()
+            session.addOutput(output)
+            self.session = session
+            self.output = output
+            let preview = AVCaptureVideoPreviewLayer(session: session)
+            preview.videoGravity = .resizeAspectFill
+            preview.frame = view.layer.bounds
+            view.layer.insertSublayer(preview, at: 0)
+            self.preview = preview
+            queue.async { session.startRunning() }
+        } catch {
+            showErrorAlert(title: "无法开启相机", message: "相机会话配置失败：\(error.localizedDescription)")
+        }
+    }
+
+    private func showErrorAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "知道了", style: .default))
+        present(alert, animated: true)
     }
 
     private func showCameraDeniedAlert() {

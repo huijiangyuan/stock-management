@@ -73,25 +73,41 @@ final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObje
 
     private func beginCapture() {
         guard captureDevice == nil else { return }
-        guard let device = AVCaptureDevice.default(for: .video),
-              let input = try? AVCaptureDeviceInput(device: device) else { return }
+        guard let device = AVCaptureDevice.default(for: .video) else {
+            showErrorAlert(title: "无法开启相机", message: "未检测到摄像头设备，请改用「手动输入」条码或「选择原材料」。")
+            return
+        }
+        guard let input = AVCaptureDeviceInput(device: device) else {
+            showErrorAlert(title: "无法开启相机", message: "相机输入初始化失败，请重试或改用其他识别方式。")
+            return
+        }
         self.captureDevice = device
         let session = AVCaptureSession()
-        session.addInput(input)
-        let output = AVCaptureMetadataOutput()
-        session.addOutput(output)
-        output.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
-        output.metadataObjectTypes = [.qr, .ean13, .ean8, .code128, .code39]
-        self.session = session
+        do {
+            session.addInput(input)
+            let output = AVCaptureMetadataOutput()
+            session.addOutput(output)
+            output.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
+            output.metadataObjectTypes = [.qr, .ean13, .ean8, .code128, .code39]
+            self.session = session
 
-        let preview = AVCaptureVideoPreviewLayer(session: session)
-        preview.videoGravity = .resizeAspectFill
-        preview.frame = view.layer.bounds
-        view.layer.addSublayer(preview)
-        self.previewLayer = preview
-        addFrameOverlay()
-        addOverlayButtons()
-        sessionQueue.async { session.startRunning() }
+            let preview = AVCaptureVideoPreviewLayer(session: session)
+            preview.videoGravity = .resizeAspectFill
+            preview.frame = view.layer.bounds
+            view.layer.addSublayer(preview)
+            self.previewLayer = preview
+            addFrameOverlay()
+            addOverlayButtons()
+            sessionQueue.async { session.startRunning() }
+        } catch {
+            showErrorAlert(title: "无法开启相机", message: "相机会话配置失败：\(error.localizedDescription)")
+        }
+    }
+
+    private func showErrorAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "知道了", style: .default))
+        present(alert, animated: true)
     }
 
     private func showCameraDeniedAlert() {

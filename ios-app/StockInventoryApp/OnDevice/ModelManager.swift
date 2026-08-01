@@ -247,8 +247,9 @@ final class ModelManager {
         if case .downloading = state { state = .downloading(progress) }
     }
 
-    fileprivate func didFinishDownloading(to location: URL) {
-        lastLocation = location
+    /// 由下载代理在「同步移动临时文件到稳定位置后」回调，记录稳定路径。
+    fileprivate func didFinishStash(stableURL: URL) {
+        lastLocation = stableURL
     }
 
     fileprivate func didComplete(task: URLSessionTask, error: Error?) {
@@ -342,9 +343,20 @@ private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
         Task { @MainActor in self.manager?.didWrite(progress: p) }
     }
 
+    /// 关键修复：系统会在 didFinishDownloadingTo 返回后【立即删除】临时 location 文件，
+    /// 因此必须在本方法内【同步】把文件移到稳定位置，绝不可延迟到 didCompleteWithError。
     func urlSession(_ session: URLSession, downloadTask task: URLSessionDownloadTask,
                     didFinishDownloadingTo location: URL) {
-        Task { @MainActor in self.manager?.didFinishDownloading(to: location) }
+        let stable = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dl_\(task.taskIdentifier).bin")
+        do {
+            try? FileManager.default.removeItem(at: stable)
+            try FileManager.default.moveItem(at: location, to: stable)
+        } catch {
+            Task { @MainActor in self.manager?.didComplete(task: task, error: error) }
+            return
+        }
+        Task { @MainActor in self.manager?.didFinishStash(stableURL: stable) }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
