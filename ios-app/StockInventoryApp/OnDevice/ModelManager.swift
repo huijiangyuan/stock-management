@@ -28,8 +28,8 @@ final class ModelManager {
 
     /// 安全审计要求：预期哈希须编译进二进制（非 plist / UserDefaults），防止被篡改绕过。
     /// 值来自 https://modelscope.cn/api/v1/models/OpenBMB/MiniCPM-V-4.6-gguf/repo/files
-    static let expectedLLMSha256 = "6b0c74962c44bc6bf4b655b9b02c13eda9d5a0491543ae976d1ac18e4b7892e2"
-    static let expectedMmprojSha256 = "ca931d861d0801d9003e50697cd764721a334107c0e0415a51168ee1938462de"
+    nonisolated static let expectedLLMSha256 = "6b0c74962c44bc6bf4b655b9b02c13eda9d5a0491543ae976d1ac18e4b7892e2"
+    nonisolated static let expectedMmprojSha256 = "ca931d861d0801d9003e50697cd764721a334107c0e0415a51168ee1938462de"
 
     // MARK: - 官方域名白名单（默认源）
 
@@ -253,7 +253,7 @@ final class ModelManager {
 
     fileprivate func didComplete(task: URLSessionTask, error: Error?) {
         if let err = error {
-            if let rd = (err as NSError).userInfo[NSURLSessionDownloadTaskResumeDataErrorKey] as? Data {
+            if let rd = (err as NSError).userInfo["NSURLSessionDownloadTaskResumeDataErrorKey"] as? Data {
                 resumeData = rd
             }
             if retryCount < maxRetry, resumeData != nil {
@@ -297,8 +297,8 @@ final class ModelManager {
         return blocked.contains { host.hasPrefix($0) }
     }
 
-    /// 流式 sha256（CommonCrypto，避免大文件整块读入内存）。
-    static func sha256Hex(of url: URL) -> String? {
+    /// 流式 sha256（CommonCrypto，避免大文件整块读入内存）。nonisolated 以便后台线程执行。
+    nonisolated static func sha256Hex(of url: URL) -> String? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         var ctx = CC_SHA256_CTX()
         CC_SHA256_Init(&ctx)
@@ -317,7 +317,7 @@ final class ModelManager {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    static func verifyFile(_ url: URL, expected: String?) -> Bool {
+    nonisolated static func verifyFile(_ url: URL, expected: String?) -> Bool {
         guard let expected, !expected.isEmpty else { return true }
         guard let got = sha256Hex(of: url) else { return false }
         return got.lowercased() == expected.lowercased()
