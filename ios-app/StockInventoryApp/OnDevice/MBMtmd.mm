@@ -24,9 +24,9 @@
 // (build_xcframework.sh copies llama.h / mtmd.h / mtmd-helper.h flat into
 // Headers/, so we include them by bare name and point HEADER_SEARCH_PATHS
 // at the xcframework Headers directory).
-#include <llama.h>
-#include <mtmd.h>
-#include <mtmd-helper.h>
+#include <llama/llama.h>
+#include <llama/mtmd.h>
+#include <llama/mtmd-helper.h>
 
 #include <cstdio>
 #include <cstdlib>
