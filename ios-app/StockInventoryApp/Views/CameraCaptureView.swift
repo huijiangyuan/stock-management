@@ -48,6 +48,24 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
     @objc private func close() { dismiss(animated: true) }
 
     private func setupCapture() {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        switch status {
+        case .authorized:
+            beginCapture()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                guard granted else { return }
+                DispatchQueue.main.async { self?.beginCapture() }
+            }
+        case .denied, .restricted:
+            showCameraDeniedAlert()
+        @unknown default:
+            break
+        }
+    }
+
+    private func beginCapture() {
+        guard session == nil else { return }
         guard let device = AVCaptureDevice.default(for: .video),
               let input = try? AVCaptureDeviceInput(device: device) else { return }
         let session = AVCaptureSession()
@@ -63,6 +81,21 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
         view.layer.insertSublayer(preview, at: 0)
         self.preview = preview
         queue.async { session.startRunning() }
+    }
+
+    private func showCameraDeniedAlert() {
+        let alert = UIAlertController(
+            title: "需要相机权限",
+            message: "请在「设置 → 库存管理」中开启相机权限，以使用拍照 AI 识别。",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "去设置", style: .default) { _ in
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
+        })
+        present(alert, animated: true)
     }
 
     private func addCaptureButton() {

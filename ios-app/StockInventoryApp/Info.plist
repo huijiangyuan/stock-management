@@ -18,5 +18,11 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSCameraUsageDescription</key>
+	<string>用于扫码入库与拍照 AI 识别</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>用于导出/保存样本图片到相册</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>用于保存样本图片到相册</string>
 </dict>
 </plist>
