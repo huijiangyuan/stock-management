@@ -70,8 +70,11 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
             showErrorAlert(title: "无法开启相机", message: "未检测到摄像头设备，请改用「扫码识别」或手动选择原材料。")
             return
         }
-        guard let input = AVCaptureDeviceInput(device: device) else {
-            showErrorAlert(title: "无法开启相机", message: "相机输入初始化失败，请重试或改用其他识别方式。")
+        let input: AVCaptureDeviceInput
+        do {
+            input = try AVCaptureDeviceInput(device: device)
+        } catch {
+            showErrorAlert(title: "无法开启相机", message: "相机输入初始化失败：\(error.localizedDescription)")
             return
         }
         let session = AVCaptureSession()
