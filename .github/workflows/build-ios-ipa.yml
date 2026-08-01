@@ -20,21 +20,57 @@ jobs:
   # ─────────────────────────────────────────────────────────────
   # 主路径：未签名 IPA（配合 SideStore + LiveContainer 免费侧载）
   # 无需任何 Apple 开发者账号 / 证书 / provisioning profile。
+  #
+  # 端侧推理：llama.cpp-omni 子模块 + scripts/build_xcframework.sh 产出
+  # ios-app/Frameworks/llama.xcframework，按子模块 commit + Xcode 版本 + 构建脚本
+  # 哈希做缓存，避免每次重建（约 10~12 min）。
   # ─────────────────────────────────────────────────────────────
   build-unsigned:
     name: Unsigned IPA (free sideload)
     runs-on: macos-15
     steps:
-      - name: Checkout
+      - name: Checkout (含子模块)
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
+          submodules: recursive
+          lfs: false
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install build tools
+        run: brew install xcodegen cmake
+
+      - name: 计算 xcframework 缓存 key
+        id: cachekey
+        run: |
+          set -euo pipefail
+          LLAMACPP_COMMIT=$(git ls-tree HEAD ios-app/llama.cpp-omni | awk '{print $3}')
+          echo "llamacpp_commit=$LLAMACPP_COMMIT" >> "$GITHUB_OUTPUT"
+          XCODE_VERSION=$(xcodebuild -version | head -1 | tr ' ' '-')
+          echo "xcode_version=$XCODE_VERSION" >> "$GITHUB_OUTPUT"
+          SCRIPT_HASH=$(shasum -a 256 ios-app/scripts/build_xcframework.sh | awk '{print $1}')
+          echo "script_hash=$SCRIPT_HASH" >> "$GITHUB_OUTPUT"
+          echo "llama.cpp-omni @ $LLAMACPP_COMMIT | xcode $XCODE_VERSION | script $SCRIPT_HASH"
+
+      - name: 缓存 llama.xcframework
+        id: cache-xcframework
+        uses: actions/cache@v4
+        with:
+          path: ios-app/Frameworks/llama.xcframework
+          key: llama-xcframework-${{ steps.cachekey.outputs.llamacpp_commit }}-${{ steps.cachekey.outputs.xcode_version }}-${{ steps.cachekey.outputs.script_hash }}
+          restore-keys: |
+            llama-xcframework-${{ steps.cachekey.outputs.llamacpp_commit }}-
+
+      - name: 构建 llama.xcframework（缓存未命中时）
+        if: steps.cache-xcframework.outputs.cache-hit != 'true'
+        working-directory: ios-app
+        run: |
+          set -euo pipefail
+          # 只构建 device (arm64) 切片：IPA 仅用于真机侧载，体积更小、构建更快。
+          # 本地若要跑模拟器调试，手动执行 MINIMAL_MODE=ios ./scripts/build_xcframework.sh
+          MINIMAL_MODE=ios-device ./scripts/build_xcframework.sh
 
       - name: Generate Xcode project from project.yml
         working-directory: ios-app
@@ -94,8 +130,44 @@ jobs:
     if: ${{ vars.SIGNED_BUILD == 'true' }}
     needs: build-unsigned
     steps:
-      - name: Checkout
+      - name: Checkout (含子模块)
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Install build tools
+        run: brew install xcodegen cmake
+
+      - name: 计算 xcframework 缓存 key
+        id: cachekey
+        run: |
+          set -euo pipefail
+          LLAMACPP_COMMIT=$(git ls-tree HEAD ios-app/llama.cpp-omni | awk '{print $3}')
+          echo "llamacpp_commit=$LLAMACPP_COMMIT" >> "$GITHUB_OUTPUT"
+          XCODE_VERSION=$(xcodebuild -version | head -1 | tr ' ' '-')
+          echo "xcode_version=$XCODE_VERSION" >> "$GITHUB_OUTPUT"
+          SCRIPT_HASH=$(shasum -a 256 ios-app/scripts/build_xcframework.sh | awk '{print $1}')
+          echo "script_hash=$SCRIPT_HASH" >> "$GITHUB_OUTPUT"
+
+      - name: 缓存 llama.xcframework
+        id: cache-xcframework
+        uses: actions/cache@v4
+        with:
+          path: ios-app/Frameworks/llama.xcframework
+          key: llama-xcframework-${{ steps.cachekey.outputs.llamacpp_commit }}-${{ steps.cachekey.outputs.xcode_version }}-${{ steps.cachekey.outputs.script_hash }}
+          restore-keys: |
+            llama-xcframework-${{ steps.cachekey.outputs.llamacpp_commit }}-
+
+      - name: 构建 llama.xcframework（缓存未命中时）
+        if: steps.cache-xcframework.outputs.cache-hit != 'true'
+        working-directory: ios-app
+        run: |
+          set -euo pipefail
+          MINIMAL_MODE=ios-device ./scripts/build_xcframework.sh
 
       - name: Install XcodeGen
         run: brew install xcodegen

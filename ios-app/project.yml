@@ -9,8 +9,34 @@ targets:
     platform: iOS
     sources:
       - path: StockInventoryApp
+      # llama.cpp-omni 推理框架：CI / 本地由 scripts/build_xcframework.sh 生成到
+      # ios-app/Frameworks/llama.xcframework。放在 app 源码树之外，避免被 sources glob 吞掉。
+      - path: Frameworks/llama.xcframework
+        embed: true
     info:
       path: StockInventoryApp/Info.plist
+    settings:
+      base:
+        # 原生 ObjC++ 桥（MBMtmd.mm）需要 C++20
+        CLANG_CXX_LANGUAGE_STANDARD: gnu++20
+        GCC_C_LANGUAGE_STANDARD: gnu11
+        # Swift 调用 ObjC++ 桥，必须开 objcxx 互操作
+        SWIFT_OBJC_BRIDGING_HEADER: StockInventoryApp/OnDevice/StockInventoryApp-Bridging-Header.h
+        SWIFT_OBJC_INTEROP_MODE: objcxx
+        DEFINES_MODULE: true
+        # llama.xcframework 的 Headers 由 framework 的 modulemap 提供，search path 留空即可
+        HEADER_SEARCH_PATHS: ""
+        FRAMEWORK_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(PROJECT_DIR)"
+          - "$(PROJECT_DIR)/StockInventoryApp"
+          - "$(PROJECT_DIR)/Frameworks"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/Frameworks"
+        LIBRARY_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(SDKROOT)/usr/lib/swift"
 schemes:
   StockInventoryApp:
     build:

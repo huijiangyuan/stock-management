@@ -1,0 +1,4 @@
+[submodule "ios-app/llama.cpp-omni"]
+	path = ios-app/llama.cpp-omni
+	url = https://github.com/tc-mb/llama.cpp-omni.git
+	branch = master
