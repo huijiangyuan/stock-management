@@ -17,12 +17,19 @@ enum OnDeviceSafeEnvironment {
     /// 评估当前环境是否可安全运行端侧推理。
     /// - Returns: `(safe, reason)`。`safe == false` 时 `reason` 为面向用户的引导文案。
     static func evaluate() -> (safe: Bool, reason: String) {
-        // 1) LiveContainer 侧载：检测其专属 LC_ 环境变量。无论 JIT 是否开启，
-        //    其 GPU / 内存沙箱都可能让 llama.cpp 的 Metal 后端原生崩溃。
-        if getenv("LC_HOME_PATH") != nil ||
-           getenv("LC_GLOBAL_TWEAKS_FOLDER") != nil ||
-           getenv("LiveContainer") != nil {
-            return (false, "当前为 LiveContainer 侧载环境，端侧大模型（Metal 后端）会原生崩溃，已禁用。请改用 SideStore 全屏重签，或在「设置 → 端侧模型管理」配置云端 VLM。")
+        // 1) LiveContainer 侧载检测。
+        //    LiveContainer 的可靠特征（经社区文档确认）：
+        //    a) guest app 的 Bundle.main.bundlePath 含 "/Documents/Applications/"
+        //       （LC 把 guest app 存放在 Documents/Applications 下并 hook NSBundle.mainBundle）
+        //    b) HOME / NSHomeDirectory() 不指向标准沙箱路径
+        //       "/var/mobile/Containers/Data/Application/"（LC 把 HOME 设为容器路径）
+        //    无论 JIT 是否开启，其 GPU / 内存沙箱都可能让 llama.cpp 的 Metal 后端原生崩溃。
+        let bundlePath = Bundle.main.bundlePath
+        let homeDir = NSHomeDirectory()
+        let isLiveContainer = bundlePath.contains("/Documents/Applications/")
+            || !homeDir.hasPrefix("/var/mobile/Containers/Data/Application/")
+        if isLiveContainer {
+            return (false, "当前为 LiveContainer 侧载环境，端侧大模型（Metal 后端）会原生崩溃，已禁用。请改用 SideStore 全屏重签，或在「设置」配置云端 VLM。")
         }
 
         // 2) 无 Metal GPU / Metal 设备不可用
