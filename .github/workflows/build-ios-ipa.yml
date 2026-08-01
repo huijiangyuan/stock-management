@@ -48,7 +48,8 @@ jobs:
           set -euo pipefail
           LLAMACPP_COMMIT=$(git ls-tree HEAD ios-app/llama.cpp-omni | awk '{print $3}')
           echo "llamacpp_commit=$LLAMACPP_COMMIT" >> "$GITHUB_OUTPUT"
-          XCODE_VERSION=$(xcodebuild -version | head -1 | tr ' ' '-')
+          xcodebuild -version > /tmp/xcode_version.txt 2>&1
+          XCODE_VERSION=$(head -1 /tmp/xcode_version.txt | tr ' ' '-')
           echo "xcode_version=$XCODE_VERSION" >> "$GITHUB_OUTPUT"
           SCRIPT_HASH=$(shasum -a 256 ios-app/scripts/build_xcframework.sh | awk '{print $1}')
           echo "script_hash=$SCRIPT_HASH" >> "$GITHUB_OUTPUT"
@@ -148,7 +149,8 @@ jobs:
           set -euo pipefail
           LLAMACPP_COMMIT=$(git ls-tree HEAD ios-app/llama.cpp-omni | awk '{print $3}')
           echo "llamacpp_commit=$LLAMACPP_COMMIT" >> "$GITHUB_OUTPUT"
-          XCODE_VERSION=$(xcodebuild -version | head -1 | tr ' ' '-')
+          xcodebuild -version > /tmp/xcode_version.txt 2>&1
+          XCODE_VERSION=$(head -1 /tmp/xcode_version.txt | tr ' ' '-')
           echo "xcode_version=$XCODE_VERSION" >> "$GITHUB_OUTPUT"
           SCRIPT_HASH=$(shasum -a 256 ios-app/scripts/build_xcframework.sh | awk '{print $1}')
           echo "script_hash=$SCRIPT_HASH" >> "$GITHUB_OUTPUT"
