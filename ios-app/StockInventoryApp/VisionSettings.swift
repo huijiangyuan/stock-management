@@ -23,12 +23,11 @@ final class VisionSettings {
         set { UserDefaults.standard.set(newValue, forKey: "vision_local_only") }
     }
 
-    /// 优先端侧识别：默认 false。开启时若端侧模型可用则优先本地推理，否则回退云端 VLM；
+    /// 优先端侧识别：默认 true。开启时若端侧模型可用则优先本地推理，否则回退云端 VLM；
     /// 关闭时优先走云端 VLM（需配置 API Key），端侧作为兜底。永不阻塞用户。
-    /// 注意：默认关闭是因为 LiveContainer 侧载环境下 llama.cpp Metal 后端会原生崩溃，
-    /// 且该崩溃 Swift do/catch 无法捕获。用户在 SideStore 全屏重签环境下可手动开启。
+    /// 端侧引擎已强制 CPU-only 模式（绕开 Metal 后端），侧载环境安全不崩。
     var preferOnDevice: Bool {
-        get { UserDefaults.standard.object(forKey: "vision_prefer_ondevice") as? Bool ?? false }
+        get { UserDefaults.standard.object(forKey: "vision_prefer_ondevice") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "vision_prefer_ondevice") }
     }
 

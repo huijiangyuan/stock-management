@@ -90,8 +90,8 @@ final class OnDeviceVisionEngine: ObservableObject {
                 nCtx: 4096,
                 nThreads: 4,
                 temperature: 0.7,
-                useGPU: true,
-                mmprojUseGPU: true,
+                useGPU: false,       // CPU-only：绕开 Metal 后端，侧载环境不崩
+                mmprojUseGPU: false,
                 warmup: true,
                 nUbatch: tier.recommendedUbatch,
                 imageMaxSliceNums: -1,
