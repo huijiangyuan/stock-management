@@ -443,7 +443,9 @@ struct OrderCreateView: View {
         visionBusy = false
 
         let processedResult = processVisionResult(rawResult)
-        // 直接在 activeSheet 转换，绝不中途置空触发 UIKit 向上冒泡关闭父阶 Sheet
+        
+        // 给 300ms 缓冲让相机会话 Dismiss 动画在 UIKit 呈现层彻底归零，绝不触发 Modal Collision 闪退
+        try? await Task.sleep(nanoseconds: 300_000_000)
         activeSheet = .visionResult(processedResult, data)
     }
 

@@ -260,6 +260,7 @@ struct SKUFormView: View {
 
     @MainActor
     private func runAiRecognize(_ data: Data) async {
+        try? await Task.sleep(nanoseconds: 300_000_000)
         aiBusy = true
         capturedImageData = data
         let prefer = VisionSettings.shared.preferOnDevice

@@ -181,7 +181,9 @@ final class LuminaCameraViewController: UIViewController, AVCaptureVideoDataOutp
 
             AppLogger.shared.log(level: .info, category: .camera, message: "Lumina 成功捕捉画面", details: "数据体积: \(data.count / 1024) KB")
             DispatchQueue.main.async {
-                self.onPhotoCaptured?(data)
+                self.dismiss(animated: true) {
+                    self.onPhotoCaptured?(data)
+                }
             }
         }
     }
