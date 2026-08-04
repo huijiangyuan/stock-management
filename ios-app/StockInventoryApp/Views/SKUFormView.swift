@@ -1,13 +1,15 @@
 import SwiftUI
 import SwiftData
 
-/// 新增 / 编辑 SKU，并维护其多级包装规格。学习模式（扫到未知条码）也走此表单。
+/// 新增 / 编辑 SKU，并维护其多级包装规格。学习模式（扫到未知条码/AI 识别新品）也走此表单。
 struct SKUFormView: View {
     @Environment(\.modelContext) private var ctx
     @Environment(\.dismiss) private var dismiss
 
     var editing: RawMaterialSKU?
     var initialBarcode: String? = nil
+    /// AI 识别后预填的商品名称（新品登记快速通道）
+    var initialName: String? = nil
 
     @State private var skuCode = ""
     @State private var skuName = ""
@@ -81,6 +83,8 @@ struct SKUFormView: View {
             var base = PackagingUnitDraft(unitName: "散包", unitType: "BASE", conversionRatio: "1")
             if let bc = initialBarcode { base.barcode = bc }
             units = [base]
+            // AI 识别新品登记：预填名称
+            if let name = initialName { skuName = name }
             return
         }
         skuCode = s.skuCode; skuName = s.skuName; categoryName = s.categoryName

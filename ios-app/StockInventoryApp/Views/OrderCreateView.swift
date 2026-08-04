@@ -16,22 +16,42 @@ struct OrderCreateView: View {
     @State private var qtyText = "1"
     @State private var location = "默认货位"
 
-    @State private var showSKUPicker = false
-    @State private var showScanner = false
-    @State private var showLearn = false
-    @State private var learnBarcode: String? = nil
+    enum ActiveSheet: Identifiable {
+        case skuPicker
+        case scanner
+        case camera
+        case learn(barcode: String?, prefillName: String?)
+        case visionResult(RecognitionResult, Data)
+
+        var id: String {
+            switch self {
+            case .skuPicker: return "skuPicker"
+            case .scanner: return "scanner"
+            case .camera: return "camera"
+            case .learn(let b, let n): return "learn_\(b ?? "")_\(n ?? "")"
+            case .visionResult: return "visionResult"
+            }
+        }
+    }
+
+    @State private var activeSheet: ActiveSheet?
     @State private var lastMode: RecognitionMode = .manual
 
     // AI 视觉识别相关
-    @State private var showCamera = false
     @State private var visionBusy = false
-    @State private var showVisionConfirm = false
     @State private var visionImageData: Data?
     @State private var visionResultName: String?
     @State private var visionConfidence: Double = 0
     @State private var visionMessage: String?
-    /// 端侧/云端均不可用时，引导文案的 alert 开关（visionMessage 原本是死代码，无 UI 出口）。
     @State private var showVisionMsg = false
+
+    // 前置检查 Alert
+    @State private var showModelLoadGuide = false
+    @State private var showModelDownloadGuide = false
+
+    // 提交失败 Alert
+    @State private var showSubmitErrorAlert = false
+    @State private var submitErrorMessage = ""
 
     // 入库批次字段
     @State private var batchNo = ""
@@ -81,7 +101,7 @@ struct OrderCreateView: View {
                         HStack {
                             Text(sku.skuName).font(.headline)
                             Spacer()
-                            Button("重选") { showSKUPicker = true }
+                            Button("重选") { activeSheet = .skuPicker }
                         }
                         if let u = selectedUnit {
                             Picker("规格", selection: $selectedUnit) {
@@ -91,12 +111,12 @@ struct OrderCreateView: View {
                             }
                         }
                     } else {
-                        Button("选择原材料 / 扫码") { showSKUPicker = true }
+                        Button("选择原材料 / 扫码") { activeSheet = .skuPicker }
                     }
-                    Button { showScanner = true } label: {
+                    Button { activeSheet = .scanner } label: {
                         Label("扫码识别", systemImage: "barcode.viewfinder")
                     }
-                    Button { showCamera = true } label: {
+                    Button { handleAIRecognizeTap() } label: {
                         Label("AI 识别（拍照）", systemImage: "camera.viewfinder")
                     }
                     .disabled(visionBusy)
@@ -136,19 +156,38 @@ struct OrderCreateView: View {
             .navigationTitle(title)
             .toolbar {
                 Button("取消") { dismiss() }
-                Button("生成单据") { submit(); dismiss() }.disabled(!canSubmit)
+                Button("生成单据") { submit() }.disabled(!canSubmit)
             }
-            .sheet(isPresented: $showSKUPicker) { SKUPickerSheet(selected: $selectedSKU) }
-            .sheet(isPresented: $showScanner) {
-                BarcodeScannerView { code in handleScanned(code) }
-            }
-            .sheet(isPresented: $showCamera) {
-                CameraCaptureView { data in
-                    Task { await runVision(data) }
+            .sheet(item: $activeSheet) { sheet in
+                switch sheet {
+                case .skuPicker:
+                    SKUPickerSheet(selected: $selectedSKU)
+                case .scanner:
+                    BarcodeScannerView { code in handleScanned(code) }
+                case .camera:
+                    CameraCaptureView { data in
+                        Task { await runVision(data) }
+                    }
+                case .learn(let barcode, let prefillName):
+                    SKUFormView(initialBarcode: barcode, initialName: prefillName)
+                case .visionResult(let result, let data):
+                    AIRecognitionResultView(
+                        result: result,
+                        imageData: data,
+                        onConfirm: {
+                            applyVisionConfirmed(result)
+                        },
+                        onLearn: {
+                            activeSheet = .learn(barcode: nil, prefillName: result.recognizedName)
+                        },
+                        onManual: {
+                            activeSheet = .skuPicker
+                        },
+                        onRetake: {
+                            activeSheet = .camera
+                        }
+                    )
                 }
-            }
-            .sheet(isPresented: $showLearn) {
-                SKUFormView(initialBarcode: learnBarcode)
             }
             .alert("FIFO 覆盖确认", isPresented: $showFIFOAlert) {
                 Button("取消", role: .cancel) {
@@ -170,20 +209,33 @@ struct OrderCreateView: View {
                                           .map { $0.batchNo }
                 Text("所选批次并非最早可出库批次，将跳过更早批次：\(skipped.joined(separator: "、"))。是否仍按该批次出库？")
             }
-            .alert("AI 识别结果", isPresented: $showVisionConfirm) {
-                Button("采用", role: .cancel) {}
-                Button("重拍", role: .destructive) { showCamera = true }
-            } message: {
-                if let name = visionResultName {
-                    Text("识别为「\(name)」，置信度 \(Int(visionConfidence * 100))%。请确认无误后生成单据；若不准可重拍或手动选择。")
-                } else {
-                    Text("未能识别，请重拍或改用扫码 / 手动。")
+            .alert("模型未加载", isPresented: $showModelLoadGuide) {
+                Button("尝试使用云端识别") {
+                    if VisionSettings.shared.cloudReady {
+                        activeSheet = .camera
+                    } else {
+                        visionMessage = "请先在「设置」中配置云端 VLM API Key。"
+                        showVisionMsg = true
+                    }
                 }
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text("端侧 MiniCPM-V 4.6 模型已下载但尚未加载。请前往「设置 -> 端侧 AI 模型」完成加载；或配置云端 VLM API Key 使用云端识别。")
+            }
+            .alert("AI 识别未就绪", isPresented: $showModelDownloadGuide) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text("尚未准备好 AI 识别：端侧模型未下载，云端 VLM 也未配置 API Key。请前往「设置」下载端侧模型或配置云端 API Key。")
             }
             .alert("提示", isPresented: $showVisionMsg) {
                 Button("知道了", role: .cancel) {}
             } message: {
                 Text(visionMessage ?? "")
+            }
+            .alert("单据生成失败", isPresented: $showSubmitErrorAlert) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text(submitErrorMessage)
             }
         }
     }
@@ -231,10 +283,25 @@ struct OrderCreateView: View {
                 selectedSKU = sku
                 selectedUnit = result.packagingUnit ?? sku.packagingUnits.first
             } else {
-                learnBarcode = code
-                showLearn = true
+                activeSheet = .learn(barcode: code, prefillName: nil)
             }
         }
+    }
+
+    private func handleAIRecognizeTap() {
+        let settings = VisionSettings.shared
+        // 可用：端侧已就绪 or 云端配置了 Key
+        if OnDeviceVisionEngine.shared.onDeviceUsable || settings.cloudReady {
+            activeSheet = .camera
+            return
+        }
+        // 模型已下载但未加载
+        if ModelManager.shared.modelPresent {
+            showModelLoadGuide = true
+            return
+        }
+        // 完全未下载且云端未配置
+        showModelDownloadGuide = true
     }
 
     private func submit() {
@@ -260,7 +327,13 @@ struct OrderCreateView: View {
         let line = InventoryStore.OrderLine(sku: sku, unit: unit, batch: batch,
                                             operatingQty: qty, conversionRatio: unit.conversionRatio,
                                             mode: lastMode, note: fifoOverrideNote)
-        try? store.processOrder(type: orderType, lines: [line], location: location)
+        do {
+            try store.processOrder(type: orderType, lines: [line], location: location)
+            dismiss()
+        } catch {
+            submitErrorMessage = "单据处理失败：\(error.localizedDescription)"
+            showSubmitErrorAlert = true
+        }
     }
 
     // MARK: - AI 视觉识别流程（三档：端侧优先 → 云端兜底 → 引导手动）
@@ -269,9 +342,11 @@ struct OrderCreateView: View {
     private func runVision(_ data: Data) async {
         visionBusy = true
         visionImageData = data
-        let result = await resolveAndRecognize(data)
+        let rawResult = await resolveAndRecognize(data)
         visionBusy = false
-        applyVision(result)
+
+        let processedResult = processVisionResult(rawResult)
+        activeSheet = .visionResult(processedResult, data)
     }
 
     /// 按设置解析可用引擎：端侧优先（或云端不可用时）走本地 MiniCPM-V 4.6；
@@ -281,8 +356,6 @@ struct OrderCreateView: View {
         let prefer = VisionSettings.shared.preferOnDevice
         let cloudReady = VisionSettings.shared.cloudReady
 
-        // 端侧优先路径：偏好端侧且尚未加载时，先尝试加载。load 内部有环境护栏，
-        // 不安全环境会直接兜底、不会进入 C 层，因此这里调用是安全的。
         if prefer && !OnDeviceVisionEngine.shared.loadSuccess {
             await ModelManager.shared.ensureLoaded()
         }
@@ -296,17 +369,31 @@ struct OrderCreateView: View {
             if onDevice { return await OnDeviceVisionEngine.shared.recognize(imageData: data) }
         }
 
-        // 两端皆不可用：给出明确、不闪退的引导（含环境准入原因）。
         let extra = OnDeviceVisionEngine.shared.unavailableReason.isEmpty
             ? ""
             : "\n（\(OnDeviceVisionEngine.shared.unavailableReason)）"
-        visionMessage = "无可用的视觉识别：请先下载 MiniCPM-V 4.6，或在设置配置云端 VLM。\(extra)"
-        showVisionMsg = true
-        return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true)
+        return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true, recognizedName: nil)
+    }
+
+    private func processVisionResult(_ rawResult: RecognitionResult) -> RecognitionResult {
+        var res = rawResult
+        if res.sku == nil, let name = res.recognizedName, let matched = matchSKU(by: name) {
+            res = RecognitionResult(
+                confidence: res.confidence,
+                mode: res.mode,
+                needsLearning: res.needsLearning,
+                recognizedName: res.recognizedName,
+                productionDate: res.productionDate,
+                expirationDate: res.expirationDate,
+                sku: matched,
+                packagingUnit: matched.packagingUnits.first
+            )
+        }
+        return res
     }
 
     @MainActor
-    private func applyVision(_ result: RecognitionResult) {
+    private func applyVisionConfirmed(_ result: RecognitionResult) {
         if let sku = result.sku {
             selectedSKU = sku
             selectedUnit = result.packagingUnit ?? sku.packagingUnits.first
@@ -315,23 +402,7 @@ struct OrderCreateView: View {
             lastMode = .vision
             visionResultName = result.recognizedName
             visionConfidence = result.confidence
-            showVisionConfirm = true
-            return
         }
-        // 无精确 SKU 命中：尝试按名称模糊匹配本地已有原材料
-        if let name = result.recognizedName, let sku = matchSKU(by: name) {
-            selectedSKU = sku
-            selectedUnit = sku.packagingUnits.first
-            if let pd = result.productionDate { productionDate = pd }
-            if let ed = result.expirationDate { expirationDate = ed }
-            lastMode = .vision
-            visionResultName = name
-            visionConfidence = result.confidence
-            showVisionConfirm = true
-            return
-        }
-        visionMessage = "未匹配到本地 SKU：请先手动建库，或改用扫码 / 手动。"
-        showVisionMsg = true
     }
 
     /// 按识别出的名称模糊匹配本地原材料（名称互含即命中）。
