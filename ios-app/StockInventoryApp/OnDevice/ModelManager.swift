@@ -216,6 +216,7 @@ final class ModelManager {
             state = .failed("未找到模型文件，请先下载或用 Files App 放入 Documents"); return
         }
         state = .verifying
+        message = "正在校验端侧模型文件的完整性（sha256）…"
         let ok = await Task.detached { () -> Bool in
             ModelManager.verifyFile(llm, expected: ModelManager.expectedLLMSha256) &&
             ModelManager.verifyFile(mp, expected: ModelManager.expectedMmprojSha256)
@@ -224,17 +225,25 @@ final class ModelManager {
             try? FileManager.default.removeItem(at: llm)
             try? FileManager.default.removeItem(at: mp)
             refreshPresence()
-            state = .failed("校验失败（sha256 不匹配），已删除文件以防被篡改。")
+            state = .failed("校验失败（sha256 不匹配），已删除损坏文件。")
             return
         }
+
+        state = .loading
+        message = "正在自动载入端侧 MiniCPM-V 模型至内存与 NPU 加速器…"
+        AppLogger.shared.log(level: .info, category: .ai, message: "开始自动加载端侧 AI 模型...")
+
         // OnDeviceVisionEngine.load 内部在后台线程做模型初始化（warmup），await 不阻塞主线程
         await OnDeviceVisionEngine.shared.load(modelPath: llm.path, mmprojPath: mp.path)
         if OnDeviceVisionEngine.shared.loadSuccess {
             state = .loaded
             modelPresent = true
-            message = "模型已加载，端侧识别可用。"
+            message = "模型已自动加载就绪，纯端侧识别可用。"
+            AppLogger.shared.log(level: .info, category: .ai, message: "端侧 MiniCPM-V 模型自动加载成功")
+            ToastManager.shared.show(message: "🧠 端侧 AI 引擎就绪", details: "模型已自动预加载，识别数据不出设备", tone: .success)
         } else {
             state = .failed("模型加载失败：\(OnDeviceVisionEngine.shared.errorMessage)")
+            AppLogger.shared.log(level: .error, category: .ai, message: "端侧模型加载失败", details: OnDeviceVisionEngine.shared.errorMessage)
         }
     }
 

@@ -122,6 +122,9 @@ struct OrderCreateView: View {
                         // ── AI 识别引擎健康状态指示 ──────────────────────
                         aiEngineStatusBadge
                         
+                        // ── 端侧模型自动加载中动态 Banner ───────────────
+                        ModelAutoLoadingBannerView()
+
                         Button { activeSheet = .scanner } label: {
                             Label("扫码识别", systemImage: "barcode.viewfinder")
                         }
@@ -358,9 +361,14 @@ struct OrderCreateView: View {
             activeSheet = .camera
             return
         }
-        // 模型已下载但未加载
-        if ModelManager.shared.modelPresent {
-            showModelLoadGuide = true
+        // 模型已下载但未加载：改为自动加载，避免用户感知繁琐操作
+        if ModelManager.shared.modelPresent && !ModelManager.shared.loaded {
+            Task {
+                await ModelManager.shared.load()
+                if OnDeviceVisionEngine.shared.onDeviceUsable {
+                    activeSheet = .camera
+                }
+            }
             return
         }
         // 完全未下载且云端未配置

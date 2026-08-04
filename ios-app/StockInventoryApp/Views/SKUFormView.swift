@@ -91,6 +91,9 @@ struct SKUFormView: View {
                                 .buttonStyle(.plain)
                             }
                             
+                            // ── 端侧 AI 模型自动加载中动态动画提示 Banner ────
+                            ModelAutoLoadingBannerView()
+                            
                             if let msg = aiBannerMsg, showAiBanner {
                                 Text(msg)
                                     .font(.caption)
