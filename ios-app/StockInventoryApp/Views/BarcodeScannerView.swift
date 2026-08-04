@@ -43,6 +43,7 @@ final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObje
         view.backgroundColor = .black
         setupNavigationBar()
         setupCapture()
+        addTopCloseButton()
     }
 
     private func setupNavigationBar() {
@@ -86,25 +87,38 @@ final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObje
         }
         self.captureDevice = device
         let session = AVCaptureSession()
-        do {
+        session.beginConfiguration()
+
+        if session.canAddInput(input) {
             session.addInput(input)
-            let output = AVCaptureMetadataOutput()
+        } else {
+            session.commitConfiguration()
+            showErrorAlert(title: "无法开启相机", message: "相机会话输入配置失败。")
+            return
+        }
+
+        let output = AVCaptureMetadataOutput()
+        if session.canAddOutput(output) {
             session.addOutput(output)
             output.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
             output.metadataObjectTypes = [.qr, .ean13, .ean8, .code128, .code39]
-            self.session = session
-
-            let preview = AVCaptureVideoPreviewLayer(session: session)
-            preview.videoGravity = .resizeAspectFill
-            preview.frame = view.layer.bounds
-            view.layer.addSublayer(preview)
-            self.previewLayer = preview
-            addFrameOverlay()
-            addOverlayButtons()
-            sessionQueue.async { session.startRunning() }
-        } catch {
-            showErrorAlert(title: "无法开启相机", message: "相机会话配置失败：\(error.localizedDescription)")
+        } else {
+            session.commitConfiguration()
+            showErrorAlert(title: "无法开启相机", message: "相机会话输出配置失败。")
+            return
         }
+
+        session.commitConfiguration()
+        self.session = session
+
+        let preview = AVCaptureVideoPreviewLayer(session: session)
+        preview.videoGravity = .resizeAspectFill
+        preview.frame = view.layer.bounds
+        view.layer.addSublayer(preview)
+        self.previewLayer = preview
+        addFrameOverlay()
+        addOverlayButtons()
+        sessionQueue.async { session.startRunning() }
     }
 
     private func showErrorAlert(title: String, message: String) {
@@ -126,6 +140,23 @@ final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObje
             }
         })
         present(alert, animated: true)
+    }
+
+    private func addTopCloseButton() {
+        let btn = UIButton(type: .system)
+        btn.setTitle("✕ 取消", for: .normal)
+        btn.setTitleColor(.white, for: .normal)
+        btn.titleLabel?.font = .systemFont(ofSize: 15, weight: .medium)
+        btn.backgroundColor = UIColor(white: 0, alpha: 0.5)
+        btn.layer.cornerRadius = 14
+        btn.contentEdgeInsets = UIEdgeInsets(top: 6, left: 14, bottom: 6, right: 14)
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        btn.addTarget(self, action: #selector(close), for: .touchUpInside)
+        view.addSubview(btn)
+        NSLayoutConstraint.activate([
+            btn.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            btn.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
+        ])
     }
 
     // MARK: - 浮层按钮（手动输入 / 手电筒）

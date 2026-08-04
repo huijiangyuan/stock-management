@@ -10,6 +10,20 @@ struct VisionRawResult {
     var confidence: Double
 }
 
+enum VisionError: LocalizedError {
+    case httpError(statusCode: Int, message: String)
+    case parseError
+
+    var errorDescription: String? {
+        switch self {
+        case .httpError(let code, let msg):
+            return "云端 VLM 请求失败 (HTTP \(code)): \(msg)"
+        case .parseError:
+            return "解析云端 VLM 响应失败"
+        }
+    }
+}
+
 /// 视觉识别服务商协议（DashScope / Anthropic 可插拔）
 protocol CloudVisionProvider {
     func recognize(image: Data, prompt: String) async throws -> VisionRawResult
@@ -92,7 +106,13 @@ struct DashScopeProvider: CloudVisionProvider {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        
+        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+            let errorMsg = String(data: data, encoding: .utf8) ?? "未知错误"
+            throw VisionError.httpError(statusCode: httpResponse.statusCode, message: errorMsg)
+        }
+
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let output = json["output"] as? [String: Any],
            let choices = output["choices"] as? [[String: Any]],
@@ -136,7 +156,13 @@ struct AnthropicProvider: CloudVisionProvider {
         req.setValue(key, forHTTPHeaderField: "x-api-key")
         req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
+
+        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+            let errorMsg = String(data: data, encoding: .utf8) ?? "未知错误"
+            throw VisionError.httpError(statusCode: httpResponse.statusCode, message: errorMsg)
+        }
+
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let content = json["content"] as? [[String: Any]] {
             let texts = content.compactMap { $0["text"] as? String }.joined(separator: "\n")

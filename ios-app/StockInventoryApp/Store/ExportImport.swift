@@ -21,6 +21,8 @@ struct FeatureSampleDTO: Codable {
     let sampleId, angleTag: String
     let ocrTextContent: String?
     let sampleImagePath: String?
+    let visionEmbeddingBase64: String?
+    let textEmbeddingBase64: String?
 }
 
 struct BatchDTO: Codable {
@@ -86,7 +88,9 @@ enum ExportImport {
                        featureSamples: s.featureSamples.map {
                            FeatureSampleDTO(sampleId: $0.sampleId, angleTag: $0.angleTag,
                                             ocrTextContent: $0.ocrTextContent,
-                                            sampleImagePath: $0.sampleImagePath)
+                                            sampleImagePath: $0.sampleImagePath,
+                                            visionEmbeddingBase64: $0.visionEmbedding?.base64EncodedString(),
+                                            textEmbeddingBase64: $0.textEmbedding?.base64EncodedString())
                        })
             },
             batches: batches.map {
@@ -152,9 +156,12 @@ enum ExportImport {
                                              barcode: u.barcode, sku: sku))
             }
             for f in s.featureSamples {
-                context.insert(FeatureSample(sampleId: f.sampleId, angleTag: f.angleTag,
-                                             ocrTextContent: f.ocrTextContent,
-                                             sampleImagePath: f.sampleImagePath, sku: sku))
+                let sample = FeatureSample(sampleId: f.sampleId, angleTag: f.angleTag,
+                                           ocrTextContent: f.ocrTextContent,
+                                           sampleImagePath: f.sampleImagePath, sku: sku)
+                if let vB64 = f.visionEmbeddingBase64 { sample.visionEmbedding = Data(base64Encoded: vB64) }
+                if let tB64 = f.textEmbeddingBase64 { sample.textEmbedding = Data(base64Encoded: tB64) }
+                context.insert(sample)
             }
         }
 

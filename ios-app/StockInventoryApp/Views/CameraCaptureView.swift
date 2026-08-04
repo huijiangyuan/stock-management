@@ -19,9 +19,6 @@ struct CameraCaptureView: UIViewControllerRepresentable {
         init(_ p: CameraCaptureView) { self.parent = p }
         func didCapture(_ data: Data) {
             parent.onCaptured(data)
-            // photoOutput 回调可能不在主线程；dismiss 必须在主线程，否则触发
-            // UIKit 主线程违规 / 潜在崩溃。将 parent 捕获为局部常量，避免逃逸
-            // 闭包里隐式引用 self.parent 的捕获语义报错（编译错误）。
             let capturedParent = parent
             DispatchQueue.main.async { capturedParent.dismiss() }
         }
@@ -43,10 +40,17 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
         super.viewDidLoad()
         view.backgroundColor = .black
         title = "拍照识别"
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "取消", style: .done,
-                                                              target: self, action: #selector(close))
+        setupNavigationBar()
         setupCapture()
         addCaptureButton()
+        addTopCloseButton()
+    }
+
+    private func setupNavigationBar() {
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            title: "取消", style: .done,
+            target: self, action: #selector(close)
+        )
     }
 
     @objc private func close() { dismiss(animated: true) }
@@ -82,22 +86,36 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
             return
         }
         let session = AVCaptureSession()
+        session.beginConfiguration()
         session.sessionPreset = .photo
-        do {
+
+        if session.canAddInput(input) {
             session.addInput(input)
-            let output = AVCapturePhotoOutput()
-            session.addOutput(output)
-            self.session = session
-            self.output = output
-            let preview = AVCaptureVideoPreviewLayer(session: session)
-            preview.videoGravity = .resizeAspectFill
-            preview.frame = view.layer.bounds
-            view.layer.insertSublayer(preview, at: 0)
-            self.preview = preview
-            queue.async { session.startRunning() }
-        } catch {
-            showErrorAlert(title: "无法开启相机", message: "相机会话配置失败：\(error.localizedDescription)")
+        } else {
+            session.commitConfiguration()
+            showErrorAlert(title: "无法开启相机", message: "相机会话输入配置失败。")
+            return
         }
+
+        let output = AVCapturePhotoOutput()
+        if session.canAddOutput(output) {
+            session.addOutput(output)
+        } else {
+            session.commitConfiguration()
+            showErrorAlert(title: "无法开启相机", message: "相机会话输出配置失败。")
+            return
+        }
+
+        session.commitConfiguration()
+
+        self.session = session
+        self.output = output
+        let preview = AVCaptureVideoPreviewLayer(session: session)
+        preview.videoGravity = .resizeAspectFill
+        preview.frame = view.layer.bounds
+        view.layer.insertSublayer(preview, at: 0)
+        self.preview = preview
+        queue.async { session.startRunning() }
     }
 
     private func showErrorAlert(title: String, message: String) {
@@ -119,6 +137,23 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
             }
         })
         present(alert, animated: true)
+    }
+
+    private func addTopCloseButton() {
+        let btn = UIButton(type: .system)
+        btn.setTitle("✕ 取消", for: .normal)
+        btn.setTitleColor(.white, for: .normal)
+        btn.titleLabel?.font = .systemFont(ofSize: 15, weight: .medium)
+        btn.backgroundColor = UIColor(white: 0, alpha: 0.5)
+        btn.layer.cornerRadius = 14
+        btn.contentEdgeInsets = UIEdgeInsets(top: 6, left: 14, bottom: 6, right: 14)
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        btn.addTarget(self, action: #selector(close), for: .touchUpInside)
+        view.addSubview(btn)
+        NSLayoutConstraint.activate([
+            btn.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            btn.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
+        ])
     }
 
     private func addCaptureButton() {

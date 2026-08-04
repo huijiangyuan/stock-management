@@ -377,17 +377,31 @@ struct OrderCreateView: View {
 
     private func processVisionResult(_ rawResult: RecognitionResult) -> RecognitionResult {
         var res = rawResult
-        if res.sku == nil, let name = res.recognizedName, let matched = matchSKU(by: name) {
-            res = RecognitionResult(
-                confidence: res.confidence,
-                mode: res.mode,
-                needsLearning: res.needsLearning,
-                recognizedName: res.recognizedName,
-                productionDate: res.productionDate,
-                expirationDate: res.expirationDate,
-                sku: matched,
-                packagingUnit: matched.packagingUnits.first
-            )
+        if res.sku == nil, let name = res.recognizedName {
+            if let matched = matchSKU(by: name) {
+                res = RecognitionResult(
+                    confidence: res.confidence,
+                    mode: res.mode,
+                    needsLearning: res.needsLearning,
+                    recognizedName: res.recognizedName,
+                    productionDate: res.productionDate,
+                    expirationDate: res.expirationDate,
+                    sku: matched,
+                    packagingUnit: matched.packagingUnits.first
+                )
+            } else if let localMatch = LocalFeatureEngine.searchBestMatch(ocrText: name, context: ctx) {
+                let sku = localMatch.sample.sku
+                res = RecognitionResult(
+                    confidence: max(res.confidence, Double(localMatch.similarity)),
+                    mode: res.mode,
+                    needsLearning: localMatch.similarity < 0.65,
+                    recognizedName: name,
+                    productionDate: res.productionDate,
+                    expirationDate: res.expirationDate,
+                    sku: sku,
+                    packagingUnit: localMatch.sample.unit ?? sku?.packagingUnits.first
+                )
+            }
         }
         return res
     }
@@ -424,8 +438,14 @@ struct OrderCreateView: View {
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         let path = dir.appendingPathComponent("\(UUID().uuidString).jpg")
         try? image.write(to: path)
-        let sample = FeatureSample(angleTag: "FRONT", ocrTextContent: name,
+
+        let text = name ?? sku.skuName
+        let textEmbeddingVec = LocalFeatureEngine.generateTextEmbedding(text)
+        let textData = LocalFeatureEngine.toData(textEmbeddingVec)
+
+        let sample = FeatureSample(angleTag: "FRONT", ocrTextContent: text,
                                    sampleImagePath: path.path, unit: unit, sku: sku)
+        sample.textEmbedding = textData
         ctx.insert(sample)
         try? ctx.save()
     }
