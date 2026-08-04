@@ -13,6 +13,22 @@ struct SKUFormView: View {
     /// 保存成功后的回调，将新创建/修改的 SKU 回传给调用方
     var onSaved: ((RawMaterialSKU) -> Void)? = nil
 
+    @State private var skuCode = ""
+    @State private var skuName = ""
+    @State private var categoryName = ""
+    @State private var baseUnit = "包"
+    @State private var shelfLifeDays = "0"
+    @State private var units: [PackagingUnitDraft] = []
+
+    struct PackagingUnitDraft: Identifiable {
+        var id = UUID().uuidString
+        var unitId: String? = nil
+        var unitName: String
+        var unitType: String
+        var conversionRatio: String
+        var barcode: String = ""
+    }
+
     enum FormSheet: Identifiable {
         case camera
         case scanner
