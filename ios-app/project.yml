@@ -3,10 +3,6 @@ options:
   bundleIdPrefix: com.stockmanager
   deploymentTarget:
     iOS: "17.0"
-packages:
-  Lumina:
-    url: https://github.com/dokun1/Lumina.git
-    from: 5.4.1
 targets:
   StockInventoryApp:
     type: application
@@ -18,7 +14,6 @@ targets:
     # 若仅放进 sources，只会被 copy/embed，不会往链接器传 -framework llama，
     # 导致 mb_mtmd_* / mtmd_* 等符号 undefined。
     dependencies:
-      - package: Lumina
       - framework: Frameworks/llama.xcframework
         embed: true
     settings:
