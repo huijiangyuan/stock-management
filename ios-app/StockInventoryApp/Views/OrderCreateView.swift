@@ -481,3 +481,58 @@ struct OrderCreateView: View {
         return "\(sku.skuCode)-\(df.string(from: Date()))-\(String(format: "%02d", r))"
     }
 }
+
+struct BatchPickRow: View {
+    let batch: StockBatch
+    let selected: Bool
+    let isEarliest: Bool
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(batch.batchNo).font(.subheadline)
+                    if isEarliest {
+                        Text("最早")
+                            .font(.caption2)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.warning)
+                            .clipShape(Capsule())
+                    }
+                }
+                if let exp = batch.expirationDate {
+                    Text("到期 \(AppFormatters.date.string(from: exp))")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }
+            Spacer()
+            if selected { Image(systemName: "checkmark.circle.fill").foregroundColor(.brand) }
+        }
+    }
+}
+
+/// SKU 选择浮层（可搜索）
+struct SKUPickerSheet: View {
+    @Environment(\.modelContext) private var ctx
+    @Environment(\.dismiss) private var dismiss
+    @Query(sort: \RawMaterialSKU.skuName) private var skus: [RawMaterialSKU]
+    @State private var search = ""
+    @Binding var selected: RawMaterialSKU?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(skus.filter {
+                    search.isEmpty || $0.skuName.localizedCaseInsensitiveContains(search)
+                        || $0.skuCode.localizedCaseInsensitiveContains(search)
+                }) { sku in
+                    Button { selected = sku; dismiss() } label: { SKURow(sku: sku) }
+                }
+            }
+            .searchable(text: $search, prompt: "搜索名称或编码")
+            .navigationTitle("选择原材料")
+            .toolbar { Button("关闭") { dismiss() } }
+        }
+    }
+}
