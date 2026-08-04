@@ -57,6 +57,7 @@ final class ModelManager {
         case idle
         case downloading(Double)   // 进度 0..1
         case verifying
+        case loading
         case completed
         case loaded
         case failed(String)

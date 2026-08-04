@@ -22,6 +22,8 @@ struct OrderCreateView: View {
         case camera
         case learn(barcode: String?, prefillName: String?)
         case visionResult(RecognitionResult, Data)
+        case settings
+        case modelManager
 
         var id: String {
             switch self {
@@ -30,6 +32,8 @@ struct OrderCreateView: View {
             case .camera: return "camera"
             case .learn(let b, let n): return "learn_\(b ?? "")_\(n ?? "")"
             case .visionResult: return "visionResult"
+            case .settings: return "settings"
+            case .modelManager: return "modelManager"
             }
         }
     }
@@ -187,6 +191,14 @@ struct OrderCreateView: View {
                             activeSheet = .camera
                         }
                     )
+                case .settings:
+                    NavigationStack {
+                        SettingsView()
+                    }
+                case .modelManager:
+                    NavigationStack {
+                        ModelManagerView()
+                    }
                 }
             }
             .alert("FIFO 覆盖确认", isPresented: $showFIFOAlert) {
@@ -210,24 +222,32 @@ struct OrderCreateView: View {
                 Text("所选批次并非最早可出库批次，将跳过更早批次：\(skipped.joined(separator: "、"))。是否仍按该批次出库？")
             }
             .alert("模型未加载", isPresented: $showModelLoadGuide) {
+                Button("前往设置加载模型", role: .none) {
+                    activeSheet = .modelManager
+                }
                 Button("尝试使用云端识别") {
                     if VisionSettings.shared.cloudReady {
                         activeSheet = .camera
                     } else {
-                        visionMessage = "请先在「设置」中配置云端 VLM API Key。"
-                        showVisionMsg = true
+                        activeSheet = .settings
                     }
                 }
-                Button("知道了", role: .cancel) {}
+                Button("取消", role: .cancel) {}
             } message: {
                 Text("端侧 MiniCPM-V 4.6 模型已下载但尚未加载。请前往「设置 -> 端侧 AI 模型」完成加载；或配置云端 VLM API Key 使用云端识别。")
             }
             .alert("AI 识别未就绪", isPresented: $showModelDownloadGuide) {
-                Button("知道了", role: .cancel) {}
+                Button("前往设置", role: .none) {
+                    activeSheet = .settings
+                }
+                Button("取消", role: .cancel) {}
             } message: {
-                Text("尚未准备好 AI 识别：端侧模型未下载，云端 VLM 也未配置 API Key。请前往「设置」下载端侧模型或配置云端 API Key。")
+                Text("尚未准备好 AI 识别：端侧模型未下载，云端 VLM 也未配置 API Key。可前往「设置」下载端侧模型或配置云端 API Key。")
             }
             .alert("提示", isPresented: $showVisionMsg) {
+                Button("前往设置", role: .none) {
+                    activeSheet = .settings
+                }
                 Button("知道了", role: .cancel) {}
             } message: {
                 Text(visionMessage ?? "")
@@ -346,7 +366,15 @@ struct OrderCreateView: View {
         visionBusy = false
 
         let processedResult = processVisionResult(rawResult)
-        activeSheet = .visionResult(processedResult, data)
+        if processedResult.confidence > 0 || processedResult.recognizedName != nil || processedResult.sku != nil {
+            activeSheet = .visionResult(processedResult, data)
+        } else {
+            let extra = OnDeviceVisionEngine.shared.unavailableReason.isEmpty
+                ? ""
+                : "\n（\(OnDeviceVisionEngine.shared.unavailableReason)）"
+            visionMessage = "未能识别出有效信息：请确认端侧模型已加载，或在「设置」中配置云端 VLM。\(extra)"
+            showVisionMsg = true
+        }
     }
 
     /// 按设置解析可用引擎：端侧优先（或云端不可用时）走本地 MiniCPM-V 4.6；
@@ -369,9 +397,6 @@ struct OrderCreateView: View {
             if onDevice { return await OnDeviceVisionEngine.shared.recognize(imageData: data) }
         }
 
-        let extra = OnDeviceVisionEngine.shared.unavailableReason.isEmpty
-            ? ""
-            : "\n（\(OnDeviceVisionEngine.shared.unavailableReason)）"
         return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true, recognizedName: nil)
     }
 
@@ -454,60 +479,5 @@ struct OrderCreateView: View {
         let df = DateFormatter(); df.dateFormat = "yyyyMMdd"
         let r = Int.random(in: 1...99)
         return "\(sku.skuCode)-\(df.string(from: Date()))-\(String(format: "%02d", r))"
-    }
-}
-
-struct BatchPickRow: View {
-    let batch: StockBatch
-    let selected: Bool
-    let isEarliest: Bool
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(batch.batchNo).font(.subheadline)
-                    if isEarliest {
-                        Text("最早")
-                            .font(.caption2)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.warning)
-                            .clipShape(Capsule())
-                    }
-                }
-                if let exp = batch.expirationDate {
-                    Text("到期 \(AppFormatters.date.string(from: exp))")
-                        .font(.caption2).foregroundColor(.secondary)
-                }
-            }
-            Spacer()
-            if selected { Image(systemName: "checkmark.circle.fill").foregroundColor(.brand) }
-        }
-    }
-}
-
-/// SKU 选择浮层（可搜索）
-struct SKUPickerSheet: View {
-    @Environment(\.modelContext) private var ctx
-    @Environment(\.dismiss) private var dismiss
-    @Query(sort: \RawMaterialSKU.skuName) private var skus: [RawMaterialSKU]
-    @State private var search = ""
-    @Binding var selected: RawMaterialSKU?
-
-    var body: some View {
-        NavigationStack {
-            List {
-                ForEach(skus.filter {
-                    search.isEmpty || $0.skuName.localizedCaseInsensitiveContains(search)
-                        || $0.skuCode.localizedCaseInsensitiveContains(search)
-                }) { sku in
-                    Button { selected = sku; dismiss() } label: { SKURow(sku: sku) }
-                }
-            }
-            .searchable(text: $search, prompt: "搜索名称或编码")
-            .navigationTitle("选择原材料")
-            .toolbar { Button("关闭") { dismiss() } }
-        }
     }
 }

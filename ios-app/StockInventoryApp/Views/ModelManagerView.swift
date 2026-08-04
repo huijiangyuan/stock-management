@@ -35,7 +35,7 @@ struct ModelManagerView: View {
                 HStack {
                     Text("推理引擎")
                     Spacer()
-                    Text(mgr.loaded ? "已加载 · 可本地识别" : "未加载")
+                    Text(mgr.loaded ? "已加载" : "未加载")
                         .foregroundColor(mgr.loaded ? .brand : .secondary)
                 }
                 if !mgr.message.isEmpty {
@@ -75,14 +75,29 @@ struct ModelManagerView: View {
                         Label("下载 MiniCPM-V 4.6（约 1.6 GB）", systemImage: "arrow.down.circle")
                     }
                 }
-                .disabled(downloading || mgr.loaded)
+                .disabled(downloading || mgr.loaded || isLoading)
 
                 if mgr.modelPresent && !mgr.loaded {
-                    Button { Task { await mgr.load() } } label: {
-                        Label("加载模型", systemImage: "bolt.fill")
+                    if isLoading {
+                        HStack {
+                            ProgressView()
+                                .padding(.trailing, 6)
+                            Text("正在校验与加载模型...")
+                                .font(.subheadline)
+                                .foregroundColor(.brand)
+                        }
+                        .padding(.vertical, 4)
+                    } else {
+                        Button {
+                            Task {
+                                await mgr.load()
+                            }
+                        } label: {
+                            Label("加载模型", systemImage: "bolt.fill")
+                        }
                     }
                 }
-            } header: { Label("下载模型", systemImage: "icloud.and.arrow.down") }
+            } header: { Label("下载与加载模型", systemImage: "icloud.and.arrow.down") }
 
             Section {
                 Text("若下载不稳定，可用电脑把以下两个文件放入 App 的「资料」(Documents) 目录，App 会自动识别：")
@@ -123,6 +138,11 @@ struct ModelManagerView: View {
 
     private var downloading: Bool {
         if case .downloading = mgr.state { return true }
+        return false
+    }
+
+    private var isLoading: Bool {
+        if mgr.state == .loading || mgr.state == .verifying { return true }
         return false
     }
 }

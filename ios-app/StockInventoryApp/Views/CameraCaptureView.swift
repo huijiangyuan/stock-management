@@ -184,7 +184,8 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
                      error: Error?) {
         guard error == nil, let data = photo.fileDataRepresentation() else { return }
         session?.stopRunning()
-        delegate?.didCapture(data)
+        let smallData = downscaleImage(data, maxSide: 1024)
+        delegate?.didCapture(smallData)
     }
 
     override func viewDidLayoutSubviews() {
