@@ -10,7 +10,7 @@ import Foundation
 
 enum AppVersion {
     static let version = "1.2.0"
-    static let build = "20260804.2327"
+    static let build = "20260804.2329"
 
     static var displayString: String {
         "v\(version) (Build \(build))"

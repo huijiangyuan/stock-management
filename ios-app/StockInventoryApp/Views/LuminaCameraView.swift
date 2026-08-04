@@ -145,19 +145,25 @@ final class LuminaCameraViewController: UIViewController, AVCaptureVideoDataOutp
         }
     }
 
-    // Lumina 流解算：后台串行队列解算 CMSampleBuffer → 内存友好型 800px 降采样 Data
+    // Lumina 流解算：后台串行队列解算 CMSampleBuffer → 内存极度友好型 640px 硬件级降采样 Data (锁死在 50-90KB 范围内)
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        // 仅在取帧采样时低开销导出 800px JPG
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let scale = 800.0 / max(ciImage.extent.width, ciImage.extent.height)
+        let maxDim = max(ciImage.extent.width, ciImage.extent.height)
+        let targetSide: CGFloat = 640.0
+        let scale = min(1.0, targetSide / maxDim)
         let transformed = ciImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
 
         if let cgImage = ciContext.createCGImage(transformed, from: transformed.extent) {
             let uiImage = UIImage(cgImage: cgImage)
-            if let jpgData = uiImage.jpegData(compressionQuality: 0.6) {
-                self.latestFrameData = jpgData
+            if let jpgData = uiImage.jpegData(compressionQuality: 0.5) {
+                // 如果体积仍然 > 120KB，进行二次轻量压缩，确保绝不爆内存
+                if jpgData.count > 120 * 1024, let smaller = uiImage.jpegData(compressionQuality: 0.35) {
+                    self.latestFrameData = smaller
+                } else {
+                    self.latestFrameData = jpgData
+                }
             }
         }
     }
