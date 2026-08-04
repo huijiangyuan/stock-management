@@ -50,34 +50,63 @@ struct SKUFormView: View {
         NavigationStack {
             ZStack {
                 Form {
-                    Section("AI 智能识别填表") {
-                        HStack {
-                            Button {
-                                handleCameraTap()
-                            } label: {
-                                Label("📷 拍照 AI 填表", systemImage: "camera.viewfinder")
-                                    .fontWeight(.medium)
+                    Section {
+                        VStack(spacing: 10) {
+                            HStack {
+                                Label("AI 拍照 / 扫码智能填表", systemImage: "sparkles")
+                                    .font(.subheadline)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.brand)
+                                Spacer()
                             }
-                            Spacer()
-                            Button {
-                                activeSheet = .scanner
-                            } label: {
-                                Label("扫码录入", systemImage: "barcode.viewfinder")
-                                    .foregroundColor(.secondary)
+                            
+                            HStack(spacing: 12) {
+                                Button {
+                                    handleCameraTap()
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "camera.viewfinder")
+                                        Text("📷 拍照 AI 填表")
+                                            .fontWeight(.semibold)
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 42)
+                                    .background(Color.brand)
+                                    .foregroundColor(.white)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    activeSheet = .scanner
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "barcode.viewfinder")
+                                        Text("扫码录入")
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 42)
+                                    .background(Color.surface)
+                                    .foregroundColor(.primary)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            
+                            if let msg = aiBannerMsg, showAiBanner {
+                                Text(msg)
+                                    .font(.caption)
+                                    .foregroundColor(msg.contains("成功") ? .green : .orange)
+                                    .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
-                        if let msg = aiBannerMsg, showAiBanner {
-                            Text(msg)
-                                .font(.caption)
-                                .foregroundColor(msg.contains("成功") ? .green : .orange)
-                        }
+                        .padding(.vertical, 4)
                     }
 
                     Section("基础信息") {
                         TextField("商品编码（如 SKU-1001）", text: $skuCode)
-                        TextField("商品名称（如 精品肥牛卷）", text: $skuName)
-                        TextField("品类（如 肉类/冻品）", text: $categoryName)
-                        TextField("基准单位", text: $baseUnit)
+                        TextField("商品名称（如 蓝牙耳机 / 特级红酒 / 肥牛卷）", text: $skuName)
+                        TextField("品类（如 数码 / 饮料 / 肉类 / 配件）", text: $categoryName)
+                        TextField("基准单位（如 个/包/瓶）", text: $baseUnit)
                         TextField("标准保质期（天）", text: $shelfLifeDays)
                             .keyboardType(.numberPad)
                     }
@@ -119,7 +148,7 @@ struct SKUFormView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
             }
-            .navigationTitle(editing == nil ? "新增原材料" : "编辑原材料")
+            .navigationTitle(editing == nil ? "新增商品物料" : "编辑商品物料")
             .toolbar {
                 Button("取消") { dismiss() }
                 Button("保存") { save(); dismiss() }.disabled(!canSave)
@@ -268,9 +297,13 @@ struct SKUFormView: View {
             }
             aiBannerMsg = "✨ AI 识别成功：已自动为你预填商品名称「\(name)」！"
             showAiBanner = true
+            AppLogger.shared.log(level: .info, category: .ai, message: "AI 拍照自动预填成功: 「\(name)」")
+            ToastManager.shared.show(message: "✨ AI 识别预填成功", details: "商品名称: \(name)", tone: .success)
         } else {
             aiBannerMsg = "⚠️ AI 未能在图片中识出明确商品名称，请手动填写基础信息。"
             showAiBanner = true
+            AppLogger.shared.log(level: .warning, category: .ai, message: "AI 拍照未能识出商品名称")
+            ToastManager.shared.show(message: "未识出明确商品名称", details: "请在下方手动输入商品信息", tone: .warning)
         }
     }
 

@@ -138,7 +138,7 @@ struct AIRecognitionResultView: View {
                     // ── 本地 SKU 比对结果 ────────────────────────────
                     AppCard {
                         VStack(alignment: .leading, spacing: AppSpacing.s2) {
-                            Label("材料库比对", systemImage: "magnifyingglass.circle")
+                            Label("商品库比对", systemImage: "magnifyingglass.circle")
                                 .font(.subheadline).fontWeight(.semibold)
                                 .padding(.bottom, 2)
                             if let sku = result.sku {
@@ -167,8 +167,8 @@ struct AIRecognitionResultView: View {
                                     Image(systemName: "questionmark.circle.fill")
                                         .foregroundColor(.warning)
                                     Text(result.recognizedName != nil
-                                         ? "未在材料库中找到「\(result.recognizedName!)」"
-                                         : "材料库中无匹配记录")
+                                         ? "未在商品库中找到「\(result.recognizedName!)」"
+                                         : "商品库中无匹配记录")
                                         .font(.subheadline).foregroundColor(.secondary)
                                 }
                             }
@@ -188,7 +188,7 @@ struct AIRecognitionResultView: View {
                             // 未命中或低置信度：主操作区
                             VStack(spacing: AppSpacing.s2) {
                                 let targetName = inputName.trimmingCharacters(in: .whitespacesAndNewlines)
-                                let validName = targetName.isEmpty ? (result.recognizedName ?? "未命名新材料") : targetName
+                                let validName = targetName.isEmpty ? (result.recognizedName ?? "未命名新商品") : targetName
                                 
                                 Button {
                                     onQuickAdd(validName)
@@ -196,7 +196,7 @@ struct AIRecognitionResultView: View {
                                 } label: {
                                     HStack {
                                         Image(systemName: "bolt.fill")
-                                        Text("⚡️ 一键快捷创建底库并选定「\(validName)」")
+                                        Text("⚡️ 一键快捷建库并选定「\(validName)」")
                                             .fontWeight(.semibold)
                                     }
                                     .frame(maxWidth: .infinity, minHeight: 48)
@@ -211,7 +211,7 @@ struct AIRecognitionResultView: View {
                                 } label: {
                                     HStack {
                                         Image(systemName: "square.and.pencil")
-                                        Text("详细配置并登记材料库...")
+                                        Text("详细配置并登记到商品库...")
                                     }
                                     .frame(maxWidth: .infinity, minHeight: 44)
                                     .background(Color.surface)

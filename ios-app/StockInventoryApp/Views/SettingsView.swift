@@ -57,6 +57,16 @@ struct SettingsView: View {
                     Text("导出文件可通过 AirDrop / 微信 发送给其他设备，一键恢复，全程无云端。")
                         .font(.caption).foregroundColor(.secondary)
                 }
+                Section("系统诊断与日志") {
+                    NavigationLink {
+                        DiagnosticLogView()
+                    } label: {
+                        Label("运行时诊断日志", systemImage: "stethoscope")
+                    }
+                    Text("包含 AI 识别耗时、相机会话状态、数据库 Save 异常栈及网络 API 状态码，方便一键复制排障。")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+
                 Section("关于") {
                     Text("纯离线餐饮原材料库存管理")
                     Text("本地 SQLite 存储 · 零后端依赖 · 需 iOS 17+。支持端侧 MiniCPM-V 4.6 本地推理与可选云端 VLM 兜底，识别数据默认不出设备。")

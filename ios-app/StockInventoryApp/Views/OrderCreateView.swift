@@ -101,7 +101,7 @@ struct OrderCreateView: View {
                         .disabled(presetSKU != nil)
                     }
 
-                    Section("原材料") {
+                    Section("商品物料") {
                         if let sku = selectedSKU {
                             HStack {
                                 Text(sku.skuName).font(.headline)
@@ -116,7 +116,7 @@ struct OrderCreateView: View {
                                 }
                             }
                         } else {
-                            Button("选择原材料 / 扫码") { activeSheet = .skuPicker }
+                            Button("选择商品物料 / 扫码") { activeSheet = .skuPicker }
                         }
                         
                         // ── AI 识别引擎健康状态指示 ──────────────────────
@@ -429,7 +429,9 @@ struct OrderCreateView: View {
     private func runVisionAndTransition(_ data: Data) async {
         visionBusy = true
         visionImageData = data
-        let rawResult = await resolveAndRecognize(data)
+        let rawResult = await Task.detached(priority: .userInitiated) { [data] in
+            await self.resolveAndRecognize(data)
+        }.value
         visionBusy = false
 
         let processedResult = processVisionResult(rawResult)
@@ -469,6 +471,9 @@ struct OrderCreateView: View {
         selectedSKU = newSKU
         selectedUnit = baseUnitObj
         lastMode = .vision
+
+        AppLogger.shared.log(level: .info, category: .ai, message: "一键快捷创建商品底库: 「\(skuName)」(\(skuCode))")
+        ToastManager.shared.show(message: "⚡️ 已快捷创建商品并自动选定", details: "商品名称: \(skuName)", tone: .success)
     }
 
     @MainActor
@@ -630,7 +635,7 @@ struct SKUPickerSheet: View {
                 }
             }
             .searchable(text: $search, prompt: "搜索名称或编码")
-            .navigationTitle("选择原材料")
+            .navigationTitle("选择商品物料")
             .toolbar { Button("关闭") { dismiss() } }
         }
     }

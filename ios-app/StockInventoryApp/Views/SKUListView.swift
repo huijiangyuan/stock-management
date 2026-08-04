@@ -19,7 +19,7 @@ struct SKUListView: View {
         NavigationStack {
             Group {
                 if filtered.isEmpty {
-                    EmptyState(title: "暂无原材料", hint: "点击右上角 + 新增，或扫码学习建库")
+                    EmptyState(title: "暂无商品物料", hint: "点击右上角 + 新增，或拍照/扫码智能建库")
                 } else {
                     List {
                         ForEach(filtered) { sku in
@@ -33,7 +33,7 @@ struct SKUListView: View {
                 }
             }
             .searchable(text: $search, prompt: "搜索名称或编码")
-            .navigationTitle("库存主数据")
+            .navigationTitle("商品与物料库")
             .toolbar {
                 Button { showForm = true } label: { Image(systemName: "plus.circle.fill") }
             }

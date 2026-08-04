@@ -14,5 +14,6 @@ struct MainTabView: View {
         }
         .accentColor(.brand)
         .preferredColorScheme(.dark)
+        .withToastOverlay()
     }
 }

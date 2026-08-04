@@ -120,12 +120,18 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
     }
 
     private func showErrorAlert(title: String, message: String) {
+        Task { @MainActor in
+            AppLogger.shared.log(level: .error, category: .camera, message: title, details: message)
+        }
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "知道了", style: .default))
         present(alert, animated: true)
     }
 
     private func showCameraDeniedAlert() {
+        Task { @MainActor in
+            AppLogger.shared.log(level: .warning, category: .camera, message: "相机权限未授权", details: "用户拒绝或权限未确定")
+        }
         let alert = UIAlertController(
             title: "需要相机权限",
             message: "请在「设置 → 库存管理」中开启相机权限，以使用拍照 AI 识别。",
@@ -177,16 +183,35 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
 
     @objc private func shoot() {
         guard let output else { return }
-        output.capturePhoto(with: AVCapturePhotoSettings(), delegate: self)
+        let settings = AVCapturePhotoSettings()
+        output.capturePhoto(with: settings, delegate: self)
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput,
                      didFinishProcessingPhoto photo: AVCapturePhoto,
                      error: Error?) {
         guard error == nil, let data = photo.fileDataRepresentation() else { return }
-        session?.stopRunning()
-        let smallData = downscaleImage(data, maxSide: 1024)
-        delegate?.didCapture(smallData)
+        queue.async { [weak self] in
+            self?.session?.stopRunning()
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let smallData = self?.downscaleImageData(data, maxSide: 800) ?? data
+            DispatchQueue.main.async {
+                self?.delegate?.didCapture(smallData)
+            }
+        }
+    }
+
+    private func downscaleImageData(_ data: Data, maxSide: CGFloat = 800) -> Data {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return data }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxSide,
+            kCGImageSourceCreateThumbnailWithTransform: true
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFArray) else { return data }
+        let uiImage = UIImage(cgImage: cgImage)
+        return uiImage.jpegData(compressionQuality: 0.6) ?? data
     }
 
     override func viewDidLayoutSubviews() {

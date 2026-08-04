@@ -23,11 +23,11 @@ struct DashboardView: View {
                 VStack(spacing: 14) {
                     if !expiring.isEmpty {
                         BannerView(tone: .warning,
-                                   message: "\(expiring.count) 种原材料将在 3 天内过期，请优先出库")
+                                   message: "\(expiring.count) 种商品将在 3 天内到期，请优先出库")
                     }
                     if !outOfStock.isEmpty {
                         BannerView(tone: .danger,
-                                   message: "\(outOfStock.count) 种原材料已缺货，请及时补货")
+                                   message: "\(outOfStock.count) 种商品已缺货，请及时补货")
                     }
 
                     HStack(spacing: 10) {
@@ -38,7 +38,7 @@ struct DashboardView: View {
 
                     AppCard {
                         HStack {
-                            stat("原材料", "\(skus.count)")
+                            stat("商品物料", "\(skus.count)")
                             Divider()
                             stat("临期", "\(expiring.count)")
                             Divider()
