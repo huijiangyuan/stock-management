@@ -16,10 +16,12 @@ targets:
     dependencies:
       - framework: Frameworks/llama.xcframework
         embed: true
-    info:
-      path: StockInventoryApp/Info.plist
     settings:
       base:
+        # 单一事实来源：直接用手写 Info.plist，禁止 XcodeGen 覆写
+        # （此前只用 info.path 导致 XcodeGen 每次 generate 把权限键抹掉，
+        #  产物缺 NSCameraUsageDescription → 相机 TCC SIGABRT 闪退）
+        INFOPLIST_FILE: StockInventoryApp/Info.plist
         # 原生 ObjC++ 桥（MBMtmd.mm）需要 C++20
         CLANG_CXX_LANGUAGE_STANDARD: gnu++20
         GCC_C_LANGUAGE_STANDARD: gnu11
