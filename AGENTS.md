@@ -40,7 +40,7 @@ git push origin main
 ### Step 4: 飞书 (Lark) 消息自动推送
 - 待 GitHub Actions 构建完成且 Release 资产生成后，自动调用飞书消息工具向指定会话（如「汇匠源」群 `oc_eb9652db889bededd01a877943c8bb26`）发送 Markdown 格式通知：
 ```bash
-lark-cli im +messages-send --as user --chat-id <chat_id> --markdown $'🚀 **StockManager 最新 iOS 侧载安装包 (.ipa) 构建成功！**\n\n- **版本/Commit**: `<commit_hash>`\n- **说明**: 附件已公开发布，点击以下链接免登录直接下载 `.ipa` 安装包。\n\n📥 **IPA 文件直接下载链接**:\n[https://github.com/huijiangyuan/stock-management/releases/download/latest/StockInventoryApp-unsigned.ipa](https://github.com/huijiangyuan/stock-management/releases/download/latest/StockInventoryApp-unsigned.ipa)\n\n📌 **Release 公开页面**:\n[https://github.com/huijiangyuan/stock-management/releases/tag/latest](https://github.com/huijiangyuan/stock-management/releases/tag/latest)'
+lark-cli im +messages-send --as user --chat-id <chat_id> --markdown $'🚀 **StockManager 最新 iOS 侧载安装包 (.ipa) 构建成功！**\n\n- **版本/Commit**: `<commit_hash>`\n- **说明**: 附件已公开发布，点击以下链接免登录直接下载最新唯一的 `.ipa` 安装包（直链含 Commit 后缀破除缓存）。\n\n📥 **带 Commit 后缀专属直链**:\n[https://github.com/huijiangyuan/stock-management/releases/download/latest/StockManager-<short_commit>.ipa](https://github.com/huijiangyuan/stock-management/releases/download/latest/StockManager-<short_commit>.ipa)\n\n📥 **通用直接下载链接**:\n[https://github.com/huijiangyuan/stock-management/releases/download/latest/StockInventoryApp-unsigned.ipa](https://github.com/huijiangyuan/stock-management/releases/download/latest/StockInventoryApp-unsigned.ipa)\n\n📌 **Release 公开页面**:\n[https://github.com/huijiangyuan/stock-management/releases/tag/latest](https://github.com/huijiangyuan/stock-management/releases/tag/latest)'
 ```
 
 ---

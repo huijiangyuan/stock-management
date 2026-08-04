@@ -61,6 +61,12 @@ struct DashboardView: View {
                             }
                         }
                     }
+
+                    Text("StockManager \(AppVersion.displayString)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 8)
                 }
                 .padding(14)
             }

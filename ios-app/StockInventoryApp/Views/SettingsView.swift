@@ -68,7 +68,14 @@ struct SettingsView: View {
                 }
 
                 Section("关于") {
-                    Text("纯离线餐饮原材料库存管理")
+                    HStack {
+                        Text("应用版本")
+                        Spacer()
+                        Text(AppVersion.displayString)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Text("纯离线通用商品物料库存管理")
                     Text("本地 SQLite 存储 · 零后端依赖 · 需 iOS 17+。支持端侧 MiniCPM-V 4.6 本地推理与可选云端 VLM 兜底，识别数据默认不出设备。")
                         .font(.caption).foregroundColor(.secondary)
                 }
