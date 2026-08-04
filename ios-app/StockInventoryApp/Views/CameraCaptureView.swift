@@ -2,27 +2,12 @@ import SwiftUI
 import AVFoundation
 
 /// 拍照视图（AVFoundation 静态拍照，区别于条码扫码）。拍下后回调 JPEG Data。
-struct CameraCaptureView: UIViewControllerRepresentable {
+struct CameraCaptureView: View {
     var onCaptured: (Data) -> Void
-    @Environment(\.dismiss) private var dismiss
 
-    func makeUIViewController(context: Context) -> CameraVC {
-        let vc = CameraVC()
-        vc.delegate = context.coordinator
-        return vc
-    }
-    func updateUIViewController(_ uiViewController: CameraVC, context: Context) {}
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    final class Coordinator: NSObject, CameraVCDelegate {
-        let parent: CameraCaptureView
-        init(_ p: CameraCaptureView) { self.parent = p }
-        func didCapture(_ data: Data) {
-            let capturedParent = parent
-            DispatchQueue.main.async {
-                capturedParent.onCaptured(data)
-            }
-        }
+    var body: some View {
+        LuminaCameraView(onCaptured: onCaptured)
+            .ignoresSafeArea()
     }
 }
 
