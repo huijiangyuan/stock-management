@@ -13,7 +13,9 @@ struct AIRecognitionResultView: View {
     let imageData: Data
     /// 采纳识别结果并自动填表
     let onConfirm: () -> Void
-    /// 引导登记新 SKU（传识别出的名称预填 SKUFormView）
+    /// 一键快捷创建材料底库并选定为当前单据材料
+    let onQuickAdd: (String) -> Void
+    /// 引导登记新 SKU（传识别出的名称预填 SKUFormView 详细配置）
     let onLearn: () -> Void
     /// 手动选择 SKU
     let onManual: () -> Void
@@ -21,6 +23,24 @@ struct AIRecognitionResultView: View {
     let onRetake: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var inputName: String = ""
+
+    init(result: RecognitionResult,
+         imageData: Data,
+         onConfirm: @escaping () -> Void,
+         onQuickAdd: @escaping (String) -> Void,
+         onLearn: @escaping () -> Void,
+         onManual: @escaping () -> Void,
+         onRetake: @escaping () -> Void) {
+        self.result = result
+        self.imageData = imageData
+        self.onConfirm = onConfirm
+        self.onQuickAdd = onQuickAdd
+        self.onLearn = onLearn
+        self.onManual = onManual
+        self.onRetake = onRetake
+        _inputName = State(initialValue: result.recognizedName ?? "")
+    }
 
     // 置信度颜色
     private var confidenceColor: Color {
@@ -165,12 +185,39 @@ struct AIRecognitionResultView: View {
                                 dismiss()
                             }
                         } else {
-                            // 未命中或低置信度：主操作 = 登记到材料库
-                            PrimaryButton(title: result.recognizedName != nil
-                                          ? "登记到材料库（已预填名称）"
-                                          : "登记到材料库") {
-                                onLearn()
-                                dismiss()
+                            // 未命中或低置信度：主操作区
+                            VStack(spacing: AppSpacing.s2) {
+                                let targetName = inputName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                let validName = targetName.isEmpty ? (result.recognizedName ?? "未命名新材料") : targetName
+                                
+                                Button {
+                                    onQuickAdd(validName)
+                                    dismiss()
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "bolt.fill")
+                                        Text("⚡️ 一键快捷创建底库并选定「\(validName)」")
+                                            .fontWeight(.semibold)
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 48)
+                                    .background(Color.accentColor)
+                                    .foregroundColor(.white)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                }
+
+                                Button {
+                                    onLearn()
+                                    dismiss()
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "square.and.pencil")
+                                        Text("详细配置并登记材料库...")
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .background(Color.surface)
+                                    .foregroundColor(.primary)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                }
                             }
                             if result.sku != nil {
                                 // 低置信度但命中：仍可强制采纳
@@ -178,7 +225,7 @@ struct AIRecognitionResultView: View {
                                     onConfirm()
                                     dismiss()
                                 } label: {
-                                    Text("仍然采纳此结果")
+                                    Text("仍然采纳此匹配结果")
                                         .frame(maxWidth: .infinity, minHeight: 44)
                                         .background(Color.warning.opacity(0.15))
                                         .foregroundColor(.warning)
