@@ -21,8 +21,10 @@ struct BarcodeScannerView: UIViewControllerRepresentable {
         let parent: BarcodeScannerView
         init(_ parent: BarcodeScannerView) { self.parent = parent }
         func didFind(code: String) {
-            parent.onDetected(code)
-            parent.dismiss()
+            let capturedParent = parent
+            DispatchQueue.main.async {
+                capturedParent.onDetected(code)
+            }
         }
     }
 }

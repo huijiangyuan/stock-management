@@ -186,7 +186,13 @@ struct OrderCreateView: View {
                 case .skuPicker:
                     SKUPickerSheet(selected: $selectedSKU)
                 case .scanner:
-                    BarcodeScannerView { code in handleScanned(code) }
+                    BarcodeScannerView { code in
+                        activeSheet = nil
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            handleScanned(code)
+                        }
+                    }
                 case .camera:
                     CameraCaptureView { data in
                         activeSheet = nil
