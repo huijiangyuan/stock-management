@@ -28,6 +28,8 @@ jobs:
   build-unsigned:
     name: Unsigned IPA (free sideload)
     runs-on: macos-15
+    permissions:
+      contents: write
     steps:
       - name: Checkout (含子模块)
         uses: actions/checkout@v4
@@ -124,6 +126,22 @@ jobs:
           path: ios-app/build/StockInventoryApp-unsigned.ipa
           retention-days: 30
           if-no-files-found: error
+
+      - name: Publish to Public Release (公开免登录直链下载)
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: latest
+          target_commitish: ${{ github.sha }}
+          name: StockManager 最新未签名构建 (公开免登录版)
+          body: |
+            ## 📱 最新侧载安装包自动发布
+            - **Commit**: `${{ github.sha }}`
+            - **适用环境**: SideStore / TrollStore / LiveContainer 侧载免签名安装
+            - **说明**: 任何人均可公开免登录点击附件直接下载 `.ipa` 文件。
+          files: ios-app/build/StockInventoryApp-unsigned.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ─────────────────────────────────────────────────────────────
   # 可选路径：真签名 IPA（需付费 Apple Developer 账号）。
