@@ -380,26 +380,26 @@ struct OrderCreateView: View {
         if res.sku == nil, let name = res.recognizedName {
             if let matched = matchSKU(by: name) {
                 res = RecognitionResult(
+                    sku: matched,
+                    packagingUnit: matched.packagingUnits.first,
                     confidence: res.confidence,
                     mode: res.mode,
                     needsLearning: res.needsLearning,
                     recognizedName: res.recognizedName,
                     productionDate: res.productionDate,
-                    expirationDate: res.expirationDate,
-                    sku: matched,
-                    packagingUnit: matched.packagingUnits.first
+                    expirationDate: res.expirationDate
                 )
             } else if let localMatch = LocalFeatureEngine.searchBestMatch(ocrText: name, context: ctx) {
                 let sku = localMatch.sample.sku
                 res = RecognitionResult(
+                    sku: sku,
+                    packagingUnit: localMatch.sample.unit ?? sku?.packagingUnits.first,
                     confidence: max(res.confidence, Double(localMatch.similarity)),
                     mode: res.mode,
                     needsLearning: localMatch.similarity < 0.65,
                     recognizedName: name,
                     productionDate: res.productionDate,
-                    expirationDate: res.expirationDate,
-                    sku: sku,
-                    packagingUnit: localMatch.sample.unit ?? sku?.packagingUnits.first
+                    expirationDate: res.expirationDate
                 )
             }
         }
