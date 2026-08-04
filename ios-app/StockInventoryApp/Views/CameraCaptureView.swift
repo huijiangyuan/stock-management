@@ -209,7 +209,7 @@ final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
             kCGImageSourceThumbnailMaxPixelSize: maxSide,
             kCGImageSourceCreateThumbnailWithTransform: true
         ]
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFArray) else { return data }
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return data }
         let uiImage = UIImage(cgImage: cgImage)
         return uiImage.jpegData(compressionQuality: 0.6) ?? data
     }
