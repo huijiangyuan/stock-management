@@ -89,72 +89,91 @@ struct OrderCreateView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("单据类型") {
-                    Picker("类型", selection: $orderType) {
-                        Text("入库").tag("INBOUND")
-                        Text("出库").tag("OUTBOUND")
-                        Text("盘点").tag("CHECK")
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(presetSKU != nil)
-                }
-
-                Section("原材料") {
-                    if let sku = selectedSKU {
-                        HStack {
-                            Text(sku.skuName).font(.headline)
-                            Spacer()
-                            Button("重选") { activeSheet = .skuPicker }
+            ZStack {
+                Form {
+                    Section("单据类型") {
+                        Picker("类型", selection: $orderType) {
+                            Text("入库").tag("INBOUND")
+                            Text("出库").tag("OUTBOUND")
+                            Text("盘点").tag("CHECK")
                         }
-                        if let u = selectedUnit {
-                            Picker("规格", selection: $selectedUnit) {
-                                ForEach(sku.packagingUnits) { unit in
-                                    Text("\(unit.unitName) ×\(AppFormatters.fmt(unit.conversionRatio))").tag(unit as PackagingUnit?)
+                        .pickerStyle(.segmented)
+                        .disabled(presetSKU != nil)
+                    }
+
+                    Section("原材料") {
+                        if let sku = selectedSKU {
+                            HStack {
+                                Text(sku.skuName).font(.headline)
+                                Spacer()
+                                Button("重选") { activeSheet = .skuPicker }
+                            }
+                            if let u = selectedUnit {
+                                Picker("规格", selection: $selectedUnit) {
+                                    ForEach(sku.packagingUnits) { unit in
+                                        Text("\(unit.unitName) ×\(AppFormatters.fmt(unit.conversionRatio))").tag(unit as PackagingUnit?)
+                                    }
                                 }
                             }
+                        } else {
+                            Button("选择原材料 / 扫码") { activeSheet = .skuPicker }
                         }
-                    } else {
-                        Button("选择原材料 / 扫码") { activeSheet = .skuPicker }
+                        Button { activeSheet = .scanner } label: {
+                            Label("扫码识别", systemImage: "barcode.viewfinder")
+                        }
+                        Button { handleAIRecognizeTap() } label: {
+                            Label("AI 识别（拍照）", systemImage: "camera.viewfinder")
+                        }
+                        .disabled(visionBusy)
                     }
-                    Button { activeSheet = .scanner } label: {
-                        Label("扫码识别", systemImage: "barcode.viewfinder")
-                    }
-                    Button { handleAIRecognizeTap() } label: {
-                        Label("AI 识别（拍照）", systemImage: "camera.viewfinder")
-                    }
-                    .disabled(visionBusy)
-                }
 
-                if selectedSKU != nil {
-                    Section("数量") {
-                        HStack {
-                            TextField("操作数量", text: $qtyText).keyboardType(.decimalPad)
+                    if selectedSKU != nil {
+                        Section("数量") {
+                            HStack {
+                                TextField("操作数量", text: $qtyText).keyboardType(.decimalPad)
+                                if let u = selectedUnit {
+                                    Text(u.unitName).foregroundColor(.secondary)
+                                }
+                            }
                             if let u = selectedUnit {
-                                Text(u.unitName).foregroundColor(.secondary)
+                                Text("换算为 \(AppFormatters.fmt(totalBase)) \(selectedSKU?.baseUnit ?? "包")")
+                                    .font(.subheadline).foregroundColor(.secondary)
                             }
                         }
-                        if let u = selectedUnit {
-                            Text("换算为 \(AppFormatters.fmt(totalBase)) \(selectedSKU?.baseUnit ?? "包")")
-                                .font(.subheadline).foregroundColor(.secondary)
+
+                        Section("货位") {
+                            TextField("货位名称", text: $location)
+                        }
+
+                        if orderType == "INBOUND" {
+                            Section("新建批次") {
+                                TextField("批次号（留空自动生成）", text: $batchNo)
+                                DatePicker("生产日期", selection: $productionDate, displayedComponents: .date)
+                                DatePicker("到期日期", selection: $expirationDate, displayedComponents: .date)
+                                TextField("供应商", text: $supplier)
+                                TextField("入库单价", text: $inboundPrice).keyboardType(.decimalPad)
+                            }
+                        } else {
+                            batchSection
                         }
                     }
+                }
 
-                    Section("货位") {
-                        TextField("货位名称", text: $location)
+                if visionBusy {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                    VStack(spacing: 14) {
+                        ProgressView()
+                            .scaleEffect(1.3)
+                        Text("AI 正在分析识别图片，请稍候...")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
                     }
-
-                    if orderType == "INBOUND" {
-                        Section("新建批次") {
-                            TextField("批次号（留空自动生成）", text: $batchNo)
-                            DatePicker("生产日期", selection: $productionDate, displayedComponents: .date)
-                            DatePicker("到期日期", selection: $expirationDate, displayedComponents: .date)
-                            TextField("供应商", text: $supplier)
-                            TextField("入库单价", text: $inboundPrice).keyboardType(.decimalPad)
-                        }
-                    } else {
-                        batchSection
-                    }
+                    .padding(24)
+                    .background(Color.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(radius: 12)
                 }
             }
             .navigationTitle(title)
@@ -170,7 +189,13 @@ struct OrderCreateView: View {
                     BarcodeScannerView { code in handleScanned(code) }
                 case .camera:
                     CameraCaptureView { data in
-                        Task { await runVision(data) }
+                        activeSheet = nil
+                        visionBusy = true
+                        Task { @MainActor in
+                            // 400ms 延迟等待相机 Sheet 的 UIKit 关闭动画完全结束，彻底避免 UIKit 弹窗冲突崩溃
+                            try? await Task.sleep(nanoseconds: 400_000_000)
+                            await runVision(data)
+                        }
                     }
                 case .learn(let barcode, let prefillName):
                     SKUFormView(initialBarcode: barcode, initialName: prefillName)

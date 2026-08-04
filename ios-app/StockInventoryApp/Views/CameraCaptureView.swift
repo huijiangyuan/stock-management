@@ -18,9 +18,10 @@ struct CameraCaptureView: UIViewControllerRepresentable {
         let parent: CameraCaptureView
         init(_ p: CameraCaptureView) { self.parent = p }
         func didCapture(_ data: Data) {
-            parent.onCaptured(data)
             let capturedParent = parent
-            DispatchQueue.main.async { capturedParent.dismiss() }
+            DispatchQueue.main.async {
+                capturedParent.onCaptured(data)
+            }
         }
     }
 }
