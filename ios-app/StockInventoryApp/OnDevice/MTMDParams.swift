@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import llama
 
 /// MTMD 参数配置
 @frozen public struct MTMDParams: Sendable {

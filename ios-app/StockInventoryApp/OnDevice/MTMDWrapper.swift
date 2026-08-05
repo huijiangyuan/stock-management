@@ -7,7 +7,6 @@
 
 import Foundation
 import Combine
-import llama
 
 
 /// MTMD 多模态推理包装器
@@ -538,4 +537,3 @@ public class MTMDWrapper: ObservableObject {
         generationState = state
     }
 }
-

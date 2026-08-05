@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import llama
 
 /// MTMD 流式输出 Token
 @frozen public struct MTMDToken: Sendable {
