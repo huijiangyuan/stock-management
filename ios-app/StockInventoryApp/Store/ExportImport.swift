@@ -19,9 +19,12 @@ struct PackagingUnitDTO: Codable {
 
 struct FeatureSampleDTO: Codable {
     let sampleId, angleTag: String
+    let unitId: String?
     let ocrTextContent: String?
     let sampleImagePath: String?
     let visionEmbeddingBase64: String?
+    let visionModelVersion: String?
+    let visionVectorDimension: Int?
     let textEmbeddingBase64: String?
 }
 
@@ -74,7 +77,7 @@ enum ExportImport {
         let orders = try context.fetch(FetchDescriptor<StockOrderHeader>())
 
         return ExportPacket(
-            version: 1,
+            version: 2,
             exportedAt: Date(),
             skus: skus.map { s in
                 SKUDTO(skuId: s.skuId, skuCode: s.skuCode, skuName: s.skuName,
@@ -87,9 +90,12 @@ enum ExportImport {
                        },
                        featureSamples: s.featureSamples.map {
                            FeatureSampleDTO(sampleId: $0.sampleId, angleTag: $0.angleTag,
+                                            unitId: $0.unit?.unitId,
                                             ocrTextContent: $0.ocrTextContent,
                                             sampleImagePath: $0.sampleImagePath,
                                             visionEmbeddingBase64: $0.visionEmbedding?.base64EncodedString(),
+                                            visionModelVersion: $0.visionModelVersion,
+                                            visionVectorDimension: $0.visionVectorDimension,
                                             textEmbeddingBase64: $0.textEmbedding?.base64EncodedString())
                        })
             },
@@ -150,16 +156,28 @@ enum ExportImport {
                                      shelfLifeDays: s.shelfLifeDays)
             sku.createdAt = s.createdAt
             context.insert(sku)
+            var importedUnitsByID: [String: PackagingUnit] = [:]
             for u in s.packagingUnits {
-                context.insert(PackagingUnit(unitId: u.unitId, unitName: u.unitName,
-                                             unitType: u.unitType, conversionRatio: u.conversionRatio,
-                                             barcode: u.barcode, sku: sku))
+                let unit = PackagingUnit(
+                    unitId: u.unitId,
+                    unitName: u.unitName,
+                    unitType: u.unitType,
+                    conversionRatio: u.conversionRatio,
+                    barcode: u.barcode,
+                    sku: sku
+                )
+                importedUnitsByID[u.unitId] = unit
+                context.insert(unit)
             }
             for f in s.featureSamples {
                 let sample = FeatureSample(sampleId: f.sampleId, angleTag: f.angleTag,
                                            ocrTextContent: f.ocrTextContent,
-                                           sampleImagePath: f.sampleImagePath, sku: sku)
-                if let vB64 = f.visionEmbeddingBase64 { sample.visionEmbedding = Data(base64Encoded: vB64) }
+                                           sampleImagePath: f.sampleImagePath,
+                                           visionEmbedding: f.visionEmbeddingBase64.flatMap { Data(base64Encoded: $0) },
+                                           visionModelVersion: f.visionModelVersion ?? "",
+                                           visionVectorDimension: f.visionVectorDimension ?? 0,
+                                           unit: f.unitId.flatMap { importedUnitsByID[$0] },
+                                           sku: sku)
                 if let tB64 = f.textEmbeddingBase64 { sample.textEmbedding = Data(base64Encoded: tB64) }
                 context.insert(sample)
             }
