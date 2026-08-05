@@ -135,6 +135,10 @@ jobs:
           MODEL_KB=$(du -sk "$MODEL_PATH" | awk '{print $1}')
           test "$MODEL_KB" -gt 10000 \
             || { echo "::error::MobileCLIP compiled model bundle is unexpectedly small: ${MODEL_KB}KB"; exit 1; }
+          for license in MobileCLIP-LICENSE_MODELS.txt NextLevel-LICENSE.txt; do
+            find "$APP_PATH" -name "$license" -type f | grep -q . \
+              || { echo "::error::$license missing from app bundle"; exit 1; }
+          done
           du -sh "$MODEL_PATH"
 
       - name: Package unsigned IPA
