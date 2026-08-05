@@ -658,7 +658,10 @@ extension NextLevel {
     /// - Parameters:
     ///   - mediaType: Specified media type (i.e. AVMediaTypeVideo, AVMediaTypeAudio, etc.)
     ///   - completionHandler: A block called with the responding access request result
-    public static func requestAuthorization(forMediaType mediaType: AVMediaType, completionHandler: @escaping ((AVMediaType, NextLevelAuthorizationStatus) -> Void) ) {
+    public static func requestAuthorization(
+        forMediaType mediaType: AVMediaType,
+        completionHandler: @escaping @MainActor @Sendable (AVMediaType, NextLevelAuthorizationStatus) -> Void
+    ) {
         AVCaptureDevice.requestAccess(for: mediaType) { (granted: Bool) in
             // According to documentation, requestAccess runs on an arbitary queue
             DispatchQueue.main.async {

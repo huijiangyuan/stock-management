@@ -10,6 +10,8 @@ Vendored source: NextLevel `0.19.1`.
   the iOS 18 SDK, while NextLevel creates writer metadata off the main actor.
 - Use NextLevel's explicit `deviceOrientation` state as the session-queue
   fallback instead of reading MainActor-isolated `UIDevice.current.orientation`.
+- Mark the camera authorization completion as `@MainActor @Sendable`, matching
+  the existing main-queue delivery contract under Swift 6 strict concurrency.
 
 These changes do not alter photo capture, preview, focus, session lifecycle, or
 image output behavior.
