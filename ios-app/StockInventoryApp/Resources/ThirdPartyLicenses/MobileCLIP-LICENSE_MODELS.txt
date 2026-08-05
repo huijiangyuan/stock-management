@@ -83,6 +83,6 @@ Model Derivatives.
   of the State of California without regard to its choice of law principles. The
   Convention on Contracts for the International Sale of Goods shall not apply to
   the Agreement except that the arbitration clause and any arbitration hereunder
-  shall be governed by the Federal Arbitration Act, Chapters 1 and 2. 
+  shall be governed by the Federal Arbitration Act, Chapters 1 and 2.
 
 Copyright (C) 2025 Apple Inc. All Rights Reserved.

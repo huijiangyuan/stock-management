@@ -40,7 +40,6 @@ public struct SessionState: Sendable {
     public let isVideoReady: Bool
     public let isAudioReady: Bool
 }
-
 /// Result of video append operation with first-frame detection
 public struct AppendVideoResult: Sendable {
     public let success: Bool
@@ -1074,4 +1073,3 @@ extension NextLevelSession {
         }
     }
 }
-
