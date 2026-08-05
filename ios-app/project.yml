@@ -42,6 +42,13 @@ targets:
         LIBRARY_SEARCH_PATHS:
           - "$(inherited)"
           - "$(SDKROOT)/usr/lib/swift"
+  StockInventoryAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: StockInventoryAppTests
+    dependencies:
+      - target: StockInventoryApp
 schemes:
   StockInventoryApp:
     build:
@@ -49,5 +56,9 @@ schemes:
         StockInventoryApp: all
     run:
       config: Release
+    test:
+      config: Debug
+      targets:
+        - StockInventoryAppTests
     archive:
       config: Release

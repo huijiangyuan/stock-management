@@ -6,23 +6,84 @@ import Accelerate
 /// 对应方案文档 DDL: material_feature_sample 与 端侧向量检索 (SQLite-vec / Cosine Similarity)
 struct LocalFeatureEngine {
 
+    enum VectorError: LocalizedError, Equatable {
+        case invalidByteCount(Int)
+        case emptyVector
+        case nonFiniteValue
+        case zeroNorm
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidByteCount(let count):
+                return "向量数据长度 \(count) 不是 Float32 字节数的整数倍"
+            case .emptyVector:
+                return "向量不能为空"
+            case .nonFiniteValue:
+                return "向量包含 NaN 或无穷值"
+            case .zeroNorm:
+                return "向量范数为零"
+            }
+        }
+    }
+
     // MARK: - 向量转换工具
 
     /// 将 [Float] 数组转成 Data 字节串 (Float32)
     static func toData(_ array: [Float]) -> Data {
-        return array.withUnsafeBufferPointer { Data(buffer: $0) }
+        array.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else { return Data() }
+            return Data(bytes: baseAddress, count: buffer.count * MemoryLayout<Float>.stride)
+        }
     }
 
-    /// 从 Data 字节串解析 [Float] 数组
-    static func toFloatArray(_ data: Data) -> [Float] {
-        return data.withUnsafeBytes {
-            Array($0.bindMemory(to: Float.self))
+    /// 从 Data 字节串安全解析 [Float] 数组。
+    /// SwiftData 中的历史数据可能损坏，必须先验证字节数，再逐项复制，避免未对齐内存访问。
+    static func decodeVector(_ data: Data) throws -> [Float] {
+        guard data.count.isMultiple(of: MemoryLayout<Float>.stride) else {
+            throw VectorError.invalidByteCount(data.count)
         }
+
+        let vector = data.withUnsafeBytes { rawBuffer -> [Float] in
+            stride(from: 0, to: rawBuffer.count, by: MemoryLayout<Float>.stride).map { offset in
+                var value: Float = 0
+                withUnsafeMutableBytes(of: &value) { destination in
+                    destination.copyBytes(from: rawBuffer[offset..<(offset + MemoryLayout<Float>.stride)])
+                }
+                return value
+            }
+        }
+
+        guard vector.allSatisfy({ $0.isFinite }) else {
+            throw VectorError.nonFiniteValue
+        }
+        return vector
+    }
+
+    /// 兼容旧调用点；新检索路径使用 throwing API 暴露数据损坏。
+    static func toFloatArray(_ data: Data) -> [Float] {
+        (try? decodeVector(data)) ?? []
+    }
+
+    static func normalized(_ vector: [Float]) throws -> [Float] {
+        guard !vector.isEmpty else { throw VectorError.emptyVector }
+        guard vector.allSatisfy({ $0.isFinite }) else { throw VectorError.nonFiniteValue }
+
+        var squaredNorm: Float = 0
+        vDSP_svesq(vector, 1, &squaredNorm, vDSP_Length(vector.count))
+        guard squaredNorm.isFinite, squaredNorm > 0 else { throw VectorError.zeroNorm }
+
+        var scale = 1 / sqrt(squaredNorm)
+        var output = [Float](repeating: 0, count: vector.count)
+        vDSP_vsmul(vector, 1, &scale, &output, 1, vDSP_Length(vector.count))
+        return output
     }
 
     /// 计算两个 [Float] 向量的余弦相似度 (Cosine Similarity)
     static func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Float {
-        guard a.count == b.count, !a.isEmpty else { return 0 }
+        guard a.count == b.count,
+              !a.isEmpty,
+              a.allSatisfy({ $0.isFinite }),
+              b.allSatisfy({ $0.isFinite }) else { return 0 }
         var dot: Float = 0
         var normA: Float = 0
         var normB: Float = 0
@@ -32,7 +93,9 @@ struct LocalFeatureEngine {
         vDSP_svesq(b, 1, &normB, vDSP_Length(b.count))
         
         let denom = sqrt(normA) * sqrt(normB)
-        return denom > 0 ? dot / denom : 0
+        guard denom.isFinite, denom > 0 else { return 0 }
+        let similarity = dot / denom
+        return similarity.isFinite ? min(1, max(-1, similarity)) : 0
     }
 
     /// 基于文本字词特征哈希生成固定 512 维 Float 模拟 Embedding（端侧离线文本向量补丁）
