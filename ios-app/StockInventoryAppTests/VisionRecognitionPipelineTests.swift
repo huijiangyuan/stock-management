@@ -55,6 +55,30 @@ final class VisionRecognitionPipelineTests: XCTestCase {
         XCTAssertEqual(outcome.matches.first?.similarity, 0.42)
     }
 
+    func testMediumConfidenceVectorMatchReturnsCandidatesWithoutFallback() async throws {
+        let context = try makeContext()
+        let sku = RawMaterialSKU(skuCode: "SKU-MID", skuName: "中分商品", categoryName: "测试")
+        let sample = FeatureSample(sku: sku)
+        var fallbackCalled = false
+        let pipeline = VisionRecognitionPipeline(
+            context: context,
+            imageProcessor: FakeImageProcessor(),
+            embeddingEngine: FakeEmbeddingEngine(),
+            featureRepository: FakeFeatureSearch(matches: [FeatureMatch(sample: sample, similarity: 0.72)]),
+            fallback: { _ in
+                fallbackCalled = true
+                return (RecognitionResult(confidence: 0, mode: .vision, needsLearning: true), .miniCPM)
+            }
+        )
+
+        let outcome = try await pipeline.recognize(rawImageData: Data([0x01]))
+
+        XCTAssertFalse(fallbackCalled)
+        XCTAssertEqual(outcome.source, .vector)
+        XCTAssertEqual(outcome.result.sku?.skuCode, "SKU-MID")
+        XCTAssertTrue(outcome.result.needsLearning)
+    }
+
     private func makeContext() throws -> ModelContext {
         let configuration = ModelConfiguration(schema: StockModelContainer.schema, isStoredInMemoryOnly: true)
         return ModelContext(try ModelContainer(for: StockModelContainer.schema, configurations: [configuration]))

@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 /// 新增 / 编辑 SKU，并维护其多级包装规格。学习模式（扫到未知条码/AI 识别新品）也走此表单。
 struct SKUFormView: View {
@@ -44,6 +45,7 @@ struct SKUFormView: View {
     @State private var aiBusy = false
     @State private var pendingCameraData: Data? = nil
     @State private var capturedOutcome: VisionRecognitionOutcome? = nil
+    @State private var recognitionTask: Task<Void, Never>? = nil
     @State private var aiBannerMsg: String? = nil
     @State private var showAiBanner = false
 
@@ -177,6 +179,19 @@ struct SKUFormView: View {
                 }
             }
             .onAppear(perform: loadIfEditing)
+            .onDisappear {
+                recognitionTask?.cancel()
+                recognitionTask = nil
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+                recognitionTask?.cancel()
+                OnDeviceVisionEngine.shared.cancelCurrentRecognition(reason: "系统发出内存警告")
+                AppLogger.shared.log(
+                    level: .error,
+                    category: .ai,
+                    message: "系统内存不足，已取消商品图片识别"
+                )
+            }
         }
     }
 
@@ -255,7 +270,8 @@ struct SKUFormView: View {
     private func handleSheetDismissed() {
         guard let data = pendingCameraData else { return }
         pendingCameraData = nil
-        Task { @MainActor in
+        recognitionTask?.cancel()
+        recognitionTask = Task { @MainActor in
             await runAiRecognize(data)
         }
     }
@@ -273,6 +289,9 @@ struct SKUFormView: View {
         do {
             outcome = try await VisionRecognitionPipeline(context: ctx).recognize(rawImageData: data)
             capturedOutcome = outcome
+        } catch is CancellationError {
+            AppLogger.shared.log(level: .info, category: .ai, message: "商品图片识别已取消")
+            return
         } catch {
             AppLogger.shared.log(level: .error, category: .ai, message: "商品图片识别流程失败", details: error.localizedDescription)
             return

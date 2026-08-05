@@ -179,6 +179,17 @@ final class OnDeviceVisionEngine: ObservableObject {
         return Self.parseResult(wrapper.fullOutput, imageData: imageData)
     }
 
+    func cancelCurrentRecognition(reason: String) {
+        guard activeRecognitionID != nil else { return }
+        wrapper.stopGeneration()
+        AppLogger.shared.log(
+            level: .warning,
+            category: .ai,
+            message: "已请求取消 MiniCPM-V 识别",
+            details: reason
+        )
+    }
+
     // MARK: - 解析
 
     /// 从模型输出里抠 JSON，映射到 RecognitionResult。

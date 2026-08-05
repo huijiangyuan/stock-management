@@ -1,4 +1,5 @@
 import Foundation
+import os
 import SwiftData
 
 /// 单次拍照识别流水线：规范化图片 → MobileCLIP Top-3 → 高置信度直返 → MiniCPM/云端兜底。
@@ -12,29 +13,46 @@ final class VisionRecognitionPipeline {
     private let featureRepository: any FeatureSearching
     private let context: ModelContext
     private let fallback: Fallback
-    private let vectorAcceptanceThreshold: Float
+    private let vectorCandidateThreshold: Float
+    private let vectorAutoSelectionThreshold: Float
 
     init(
         context: ModelContext,
         imageProcessor: any CapturedImageProcessing = CapturedImageProcessor.shared,
         embeddingEngine: any ImageEmbeddingProviding = MobileCLIPEmbeddingEngine.shared,
         featureRepository: (any FeatureSearching)? = nil,
-        vectorAcceptanceThreshold: Float = 0.65,
+        vectorCandidateThreshold: Float = 0.65,
+        vectorAutoSelectionThreshold: Float = 0.85,
         fallback: Fallback? = nil
     ) {
         self.context = context
         self.imageProcessor = imageProcessor
         self.embeddingEngine = embeddingEngine
         self.featureRepository = featureRepository ?? FeatureRepository(context: context)
-        self.vectorAcceptanceThreshold = vectorAcceptanceThreshold
+        self.vectorCandidateThreshold = vectorCandidateThreshold
+        self.vectorAutoSelectionThreshold = vectorAutoSelectionThreshold
         self.fallback = fallback ?? { data in
             await Self.defaultFallback(imageData: data, context: context)
         }
     }
 
     func recognize(rawImageData: Data) async throws -> VisionRecognitionOutcome {
-        AppLogger.shared.log(level: .info, category: .ai, message: "开始 AI 图片识别流水线")
+        let recognitionID = String(UUID().uuidString.prefix(8))
+        let startedAt = Date()
+        AppLogger.shared.log(
+            level: .info,
+            category: .ai,
+            message: "开始 AI 图片识别流水线",
+            details: "id=\(recognitionID), input=\(rawImageData.count / 1_024)KB, availableMemory=\(os_proc_available_memory() / 1_048_576)MB"
+        )
         let processedImage = try await imageProcessor.process(rawImageData)
+        try Task.checkCancellation()
+        AppLogger.shared.log(
+            level: .info,
+            category: .ai,
+            message: "相机图片预处理完成",
+            details: "id=\(recognitionID), size=\(processedImage.pixelWidth)x\(processedImage.pixelHeight), elapsed=\(Self.elapsed(since: startedAt))s"
+        )
 
         var embedding: ImageEmbedding?
         var matches: [FeatureMatch] = []
@@ -47,32 +65,43 @@ final class VisionRecognitionPipeline {
                 topK: 12
             )
             matches = Self.uniqueSKUMatches(matches, limit: 3)
+            try Task.checkCancellation()
+            AppLogger.shared.log(
+                level: .info,
+                category: .ai,
+                message: "MobileCLIP 图片向量与 Top-3 检索完成",
+                details: "id=\(recognitionID), dimension=\(generated.dimension), candidates=\(matches.count), elapsed=\(Self.elapsed(since: startedAt))s"
+            )
         } catch {
+            if error is CancellationError { throw error }
             AppLogger.shared.log(
                 level: .warning,
                 category: .ai,
                 message: "轻量图片向量阶段失败，继续使用 VLM 兜底",
-                details: error.localizedDescription
+                details: "id=\(recognitionID), error=\(error.localizedDescription)"
             )
         }
 
-        if let best = matches.first, best.similarity >= vectorAcceptanceThreshold,
+        if let best = matches.first, best.similarity >= vectorCandidateThreshold,
            let sku = best.sample.sku {
             let result = RecognitionResult(
                 sku: sku,
                 packagingUnit: best.sample.unit ?? sku.packagingUnits.first,
                 confidence: Double(best.similarity),
                 mode: .vision,
-                needsLearning: false,
+                needsLearning: best.similarity < vectorAutoSelectionThreshold,
                 recognizedName: sku.skuName
             )
             AppLogger.shared.log(
                 level: .info,
                 category: .ai,
-                message: "本地图片向量命中商品",
-                details: "sku=\(sku.skuCode), similarity=\(best.similarity)"
+                message: best.similarity >= vectorAutoSelectionThreshold
+                    ? "本地图片向量高置信度命中商品"
+                    : "本地图片向量返回候选，等待人工确认",
+                details: "id=\(recognitionID), sku=\(sku.skuCode), similarity=\(best.similarity), candidateThreshold=\(vectorCandidateThreshold), autoThreshold=\(vectorAutoSelectionThreshold)"
             )
             return VisionRecognitionOutcome(
+                recognitionID: recognitionID,
                 result: result,
                 processedImage: processedImage,
                 embedding: embedding,
@@ -81,7 +110,9 @@ final class VisionRecognitionPipeline {
             )
         }
 
+        try Task.checkCancellation()
         let (fallbackResult, source) = await fallback(processedImage.jpegData)
+        try Task.checkCancellation()
         var resolved = fallbackResult
         if resolved.sku == nil, let name = resolved.recognizedName {
             resolved.sku = try matchSKU(by: name)
@@ -91,6 +122,7 @@ final class VisionRecognitionPipeline {
         }
 
         return VisionRecognitionOutcome(
+            recognitionID: recognitionID,
             result: resolved,
             processedImage: processedImage,
             embedding: embedding,
@@ -117,6 +149,10 @@ final class VisionRecognitionPipeline {
         }
         .prefix(limit)
         .map { $0 }
+    }
+
+    private static func elapsed(since date: Date) -> String {
+        String(format: "%.2f", Date().timeIntervalSince(date))
     }
 
     private static func defaultFallback(

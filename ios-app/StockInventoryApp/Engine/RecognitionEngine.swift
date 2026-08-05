@@ -53,6 +53,7 @@ enum VisionRecognitionSource: String, Sendable {
 }
 
 struct VisionRecognitionOutcome {
+    let recognitionID: String
     let result: RecognitionResult
     let processedImage: ProcessedCapturedImage
     let embedding: ImageEmbedding?

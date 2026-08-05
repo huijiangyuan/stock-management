@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 /// 出入库 / 盘点 单据创建。支持扫码（条码引擎）与手动两种识别来源，
 /// 自动完成 多级包装 → 基准单位 换算，并按批次 FIFO 给出出库建议。
@@ -22,8 +23,6 @@ struct OrderCreateView: View {
         case camera
         case learn(barcode: String?, prefillName: String?)
         case visionResult(VisionRecognitionOutcome)
-        case settings
-        case modelManager
 
         var id: String {
             switch self {
@@ -32,8 +31,6 @@ struct OrderCreateView: View {
             case .camera: return "camera"
             case .learn(let b, let n): return "learn_\(b ?? "")_\(n ?? "")"
             case .visionResult: return "visionResult"
-            case .settings: return "settings"
-            case .modelManager: return "modelManager"
             }
         }
     }
@@ -41,6 +38,7 @@ struct OrderCreateView: View {
     @State private var activeSheet: ActiveSheet?
     @State private var deferredSheet: ActiveSheet?
     @State private var pendingCameraData: Data?
+    @State private var recognitionTask: Task<Void, Never>?
     @State private var lastMode: RecognitionMode = .manual
 
     // AI 视觉识别相关
@@ -48,7 +46,6 @@ struct OrderCreateView: View {
     @State private var latestVisionOutcome: VisionRecognitionOutcome?
     @State private var didSaveLatestVisionSample = false
     @State private var visionResultName: String?
-    @State private var visionConfidence: Double = 0
     // 提交失败 Alert
     @State private var showSubmitErrorAlert = false
     @State private var submitErrorMessage = ""
@@ -220,14 +217,6 @@ struct OrderCreateView: View {
                             deferredSheet = .camera
                         }
                     )
-                case .settings:
-                    NavigationStack {
-                        SettingsView()
-                    }
-                case .modelManager:
-                    NavigationStack {
-                        ModelManagerView()
-                    }
                 }
             }
             .alert("FIFO 覆盖确认", isPresented: $showFIFOAlert) {
@@ -254,6 +243,19 @@ struct OrderCreateView: View {
                 Button("知道了", role: .cancel) {}
             } message: {
                 Text(submitErrorMessage)
+            }
+            .onDisappear {
+                recognitionTask?.cancel()
+                recognitionTask = nil
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+                recognitionTask?.cancel()
+                OnDeviceVisionEngine.shared.cancelCurrentRecognition(reason: "系统发出内存警告")
+                AppLogger.shared.log(
+                    level: .error,
+                    category: .ai,
+                    message: "系统内存不足，已取消本次图片识别"
+                )
             }
         }
     }
@@ -377,7 +379,8 @@ struct OrderCreateView: View {
     private func handleSheetDismissed() {
         if let data = pendingCameraData {
             pendingCameraData = nil
-            Task { @MainActor in
+            recognitionTask?.cancel()
+            recognitionTask = Task { @MainActor in
                 await runVisionAndTransition(data)
             }
             return
@@ -401,6 +404,8 @@ struct OrderCreateView: View {
             latestVisionOutcome = outcome
             didSaveLatestVisionSample = false
             activeSheet = .visionResult(outcome)
+        } catch is CancellationError {
+            AppLogger.shared.log(level: .info, category: .ai, message: "AI 图片识别已取消")
         } catch {
             AppLogger.shared.log(
                 level: .error,
@@ -468,7 +473,6 @@ struct OrderCreateView: View {
             if let ed = result.expirationDate { expirationDate = ed }
             lastMode = .vision
             visionResultName = result.recognizedName
-            visionConfidence = result.confidence
             latestVisionOutcome = outcome
         }
     }

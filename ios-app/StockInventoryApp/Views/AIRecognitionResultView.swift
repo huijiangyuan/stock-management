@@ -150,6 +150,9 @@ struct AIRecognitionResultView: View {
                                     .fontWeight(.semibold)
                                     .foregroundColor(.brand)
                             }
+                            Text("诊断编号：\(outcome.recognitionID)")
+                                .font(.caption2.monospaced())
+                                .foregroundColor(.secondary)
                             if !outcome.matches.isEmpty {
                                 Divider()
                                 Text("图片向量 Top \(outcome.matches.count)")
