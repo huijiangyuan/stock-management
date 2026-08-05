@@ -74,6 +74,15 @@ jobs:
           # 同时构建 device + simulator：归档使用真机切片，单元测试使用模拟器切片。
           MINIMAL_MODE=ios ./scripts/build_xcframework.sh
 
+      # actions/cache 的自动 post-save 在后续测试失败时可能跳过；底层框架一旦
+      # 构建成功就立即保存，避免修 Swift 编译错误时反复耗时重建 C++。
+      - name: 立即保存 llama.xcframework 缓存
+        if: steps.cache-xcframework.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ios-app/Frameworks/llama.xcframework
+          key: llama-xcframework-ios-universal-${{ steps.cachekey.outputs.llamacpp_commit }}-${{ steps.cachekey.outputs.xcode_version }}-${{ steps.cachekey.outputs.script_hash }}
+
       - name: Generate Xcode project from project.yml
         working-directory: ios-app
         run: xcodegen generate
