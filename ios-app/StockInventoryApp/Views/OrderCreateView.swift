@@ -46,6 +46,7 @@ struct OrderCreateView: View {
     // AI 视觉识别相关
     @State private var visionBusy = false
     @State private var latestVisionOutcome: VisionRecognitionOutcome?
+    @State private var didSaveLatestVisionSample = false
     @State private var visionResultName: String?
     @State private var visionConfidence: Double = 0
     // 提交失败 Alert
@@ -326,8 +327,13 @@ struct OrderCreateView: View {
             batch = selectedBatch
         }
 
-        if lastMode == .vision, let outcome = latestVisionOutcome {
-            saveFeatureSample(outcome: outcome, sku: sku, unit: unit, name: visionResultName)
+        if lastMode == .vision, !didSaveLatestVisionSample, let outcome = latestVisionOutcome {
+            didSaveLatestVisionSample = saveFeatureSample(
+                outcome: outcome,
+                sku: sku,
+                unit: unit,
+                name: visionResultName
+            )
         }
         let line = InventoryStore.OrderLine(sku: sku, unit: unit, batch: batch,
                                             operatingQty: qty, conversionRatio: unit.conversionRatio,
@@ -393,6 +399,7 @@ struct OrderCreateView: View {
         do {
             let outcome = try await VisionRecognitionPipeline(context: ctx).recognize(rawImageData: data)
             latestVisionOutcome = outcome
+            didSaveLatestVisionSample = false
             activeSheet = .visionResult(outcome)
         } catch {
             AppLogger.shared.log(
@@ -435,7 +442,12 @@ struct OrderCreateView: View {
         }
 
         // 绑定该采样的特征向量
-        saveFeatureSample(outcome: outcome, sku: newSKU, unit: baseUnitObj, name: skuName)
+        didSaveLatestVisionSample = saveFeatureSample(
+            outcome: outcome,
+            sku: newSKU,
+            unit: baseUnitObj,
+            name: skuName
+        )
 
         // 自动设为当前单据在办材料
         selectedSKU = newSKU
@@ -467,7 +479,7 @@ struct OrderCreateView: View {
         sku: RawMaterialSKU,
         unit: PackagingUnit?,
         name: String?
-    ) {
+    ) -> Bool {
         guard let embedding = outcome.embedding else {
             AppLogger.shared.log(
                 level: .error,
@@ -475,7 +487,7 @@ struct OrderCreateView: View {
                 message: "未保存图片特征样本",
                 details: "本次识别没有生成有效的 MobileCLIP 向量"
             )
-            return
+            return false
         }
         do {
             try FeatureRepository(context: ctx).saveSample(
@@ -485,8 +497,10 @@ struct OrderCreateView: View {
                 unit: unit,
                 sku: sku
             )
+            return true
         } catch {
             AppLogger.shared.log(level: .error, category: .store, message: "图片特征样本保存失败", details: error.localizedDescription)
+            return false
         }
     }
 

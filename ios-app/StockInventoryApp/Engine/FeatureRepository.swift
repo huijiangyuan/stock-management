@@ -92,6 +92,7 @@ final class FeatureRepository: FeatureSearching {
             try context.save()
             return sample
         } catch {
+            context.delete(sample)
             try? FileManager.default.removeItem(at: imageURL)
             throw error
         }
