@@ -29,9 +29,9 @@ targets:
         # 原生 ObjC++ 桥（MBMtmd.mm）需要 C++20
         CLANG_CXX_LANGUAGE_STANDARD: gnu++20
         GCC_C_LANGUAGE_STANDARD: gnu11
-        # Swift 调用 ObjC++ 桥，必须开 objcxx 互操作
+        # Swift 只调用 MBMtmd.h 暴露的纯 C API；C++ 被封装在 MBMtmd.mm 内。
+        # 不开启 Swift C++ 互操作，避免每个 Swift 编译单元导入 mtmd C++ 包装类型。
         SWIFT_OBJC_BRIDGING_HEADER: StockInventoryApp/OnDevice/StockInventoryApp-Bridging-Header.h
-        SWIFT_OBJC_INTEROP_MODE: objcxx
         DEFINES_MODULE: true
         # llama.xcframework 的 Headers 由 framework 的 modulemap 提供，search path 留空即可
         HEADER_SEARCH_PATHS: ""
