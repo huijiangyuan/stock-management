@@ -207,7 +207,7 @@ extension AVCaptureDevice.Position {
     /// - Parameter devicePosition: Camera device position to query.
     /// - Returns: `true` if the camera device exists, otherwise false.
     public var isCameraDevicePositionAvailable: Bool {
-        UIImagePickerController.isCameraDeviceAvailable(self.uikitType)
+        AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: self) != nil
     }
 
     /// UIKit device equivalent type

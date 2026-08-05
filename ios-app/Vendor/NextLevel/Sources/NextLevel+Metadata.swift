@@ -84,12 +84,14 @@ extension NextLevel {
     }
 
     internal class var assetWriterMetadata: [AVMutableMetadataItem] {
-        let currentDevice = UIDevice.current
-
         let modelItem = AVMutableMetadataItem()
         modelItem.keySpace = AVMetadataKeySpace.common
         modelItem.key = AVMetadataKey.commonKeyModel as (NSCopying & NSObjectProtocol)
-        modelItem.value = currentDevice.localizedModel as (NSCopying & NSObjectProtocol)
+        // UIDevice.current became MainActor-isolated in the iOS 18 SDK while this
+        // metadata helper is also used from NextLevel's capture queue. A static
+        // label avoids an unsafe actor hop; exact device marketing metadata is not
+        // needed for photo or video correctness.
+        modelItem.value = "iOS Device" as (NSCopying & NSObjectProtocol)
 
         let softwareItem = AVMutableMetadataItem()
         softwareItem.keySpace = AVMetadataKeySpace.common
