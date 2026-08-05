@@ -9,7 +9,9 @@ final class FeatureSample {
     var angleTag: String            // FRONT / SIDE / MARK
     var ocrTextContent: String?
     var sampleImagePath: String?    // 本地图片存储路径
-    var visionEmbedding: Data?      // 512 维 Float32（占位，后续 sqlite-vec）
+    var visionEmbedding: Data?      // Float32 图片向量
+    var visionModelVersion: String = ""
+    var visionVectorDimension: Int = 0
     var textEmbedding: Data?        // 384 维 Float32（占位）
     var createdAt: Date
 
@@ -20,12 +22,18 @@ final class FeatureSample {
          angleTag: String = "FRONT",
          ocrTextContent: String? = nil,
          sampleImagePath: String? = nil,
+         visionEmbedding: Data? = nil,
+         visionModelVersion: String = "",
+         visionVectorDimension: Int = 0,
          unit: PackagingUnit? = nil,
          sku: RawMaterialSKU? = nil) {
         self.sampleId = sampleId
         self.angleTag = angleTag
         self.ocrTextContent = ocrTextContent
         self.sampleImagePath = sampleImagePath
+        self.visionEmbedding = visionEmbedding
+        self.visionModelVersion = visionModelVersion
+        self.visionVectorDimension = visionVectorDimension
         self.unit = unit
         self.sku = sku
         self.createdAt = Date()
