@@ -8,6 +8,8 @@ Vendored source: NextLevel `0.19.1`.
 - Replaced `UIDevice.current.localizedModel` in optional asset-writer metadata
   with a static device label. UIKit isolates `UIDevice.current` to MainActor in
   the iOS 18 SDK, while NextLevel creates writer metadata off the main actor.
+- Use NextLevel's explicit `deviceOrientation` state as the session-queue
+  fallback instead of reading MainActor-isolated `UIDevice.current.orientation`.
 
 These changes do not alter photo capture, preview, focus, session lifecycle, or
 image output behavior.

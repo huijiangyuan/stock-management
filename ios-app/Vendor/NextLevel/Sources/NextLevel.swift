@@ -1466,7 +1466,10 @@ extension NextLevel {
         }
 
         var didChangeOrientation = false
-		let currentOrientation = self.deviceDelegate?.nextLevelCurrentDeviceOrientation?() ?? AVCaptureVideoOrientation.avorientationFromUIDeviceOrientation(UIDevice.current.orientation)
+		// UIDevice.current is MainActor-isolated in the iOS 18 SDK, while capture
+		// orientation is updated on NextLevel's session queue. Use the explicit
+		// NextLevel orientation state unless the client supplies an orientation.
+		let currentOrientation = self.deviceDelegate?.nextLevelCurrentDeviceOrientation?() ?? self.deviceOrientation
 
         if let videoOutput = self._videoOutput, let videoConnection = videoOutput.connection(with: AVMediaType.video) {
             if videoConnection.isVideoOrientationSupported && videoConnection.videoOrientation != currentOrientation {
@@ -3715,4 +3718,3 @@ extension NextLevel {
     //     continuation.yield(.didStart)
     // }
 }
-
