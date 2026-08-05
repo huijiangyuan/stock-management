@@ -42,7 +42,8 @@ struct SKUFormView: View {
 
     @State private var activeSheet: FormSheet? = nil
     @State private var aiBusy = false
-    @State private var capturedImageData: Data? = nil
+    @State private var pendingCameraData: Data? = nil
+    @State private var capturedOutcome: VisionRecognitionOutcome? = nil
     @State private var aiBannerMsg: String? = nil
     @State private var showAiBanner = false
 
@@ -154,15 +155,16 @@ struct SKUFormView: View {
             .navigationTitle(editing == nil ? "新增商品物料" : "编辑商品物料")
             .toolbar {
                 Button("取消") { dismiss() }
-                Button("保存") { save(); dismiss() }.disabled(!canSave)
+                Button("保存") {
+                    if save() { dismiss() }
+                }
+                .disabled(!canSave)
             }
-            .sheet(item: $activeSheet) { sheet in
+            .sheet(item: $activeSheet, onDismiss: handleSheetDismissed) { sheet in
                 switch sheet {
                 case .camera:
                     CameraCaptureView { data in
-                        Task { @MainActor in
-                            await runAiRecognize(data)
-                        }
+                        pendingCameraData = data
                     }
                 case .scanner:
                     BarcodeScannerView { code in
@@ -202,9 +204,8 @@ struct SKUFormView: View {
         }
     }
 
-    private func save() {
+    private func save() -> Bool {
         let ratio: Double = Double(shelfLifeDays) ?? 0
-        let store = InventoryStore(context: ctx)
 
         let target: RawMaterialSKU
         if let s = editing {
@@ -233,62 +234,50 @@ struct SKUFormView: View {
                 ctx.insert(pu)
             }
         }
-        try? ctx.save()
-        if let img = capturedImageData {
-            saveFeatureSample(image: img, sku: target, unit: target.packagingUnits.first, name: skuName)
+        do {
+            try ctx.save()
+        } catch {
+            AppLogger.shared.log(level: .error, category: .store, message: "商品资料保存失败", details: error.localizedDescription)
+            return false
         }
-        _ = store
+        if let outcome = capturedOutcome {
+            saveFeatureSample(outcome: outcome, sku: target, unit: target.packagingUnits.first, name: skuName)
+        }
         onSaved?(target)
+        return true
     }
 
     private func handleCameraTap() {
-        let settings = VisionSettings.shared
-        if OnDeviceVisionEngine.shared.onDeviceUsable || settings.cloudReady {
-            activeSheet = .camera
-            return
+        activeSheet = .camera
+    }
+
+    @MainActor
+    private func handleSheetDismissed() {
+        guard let data = pendingCameraData else { return }
+        pendingCameraData = nil
+        Task { @MainActor in
+            await runAiRecognize(data)
         }
-        if ModelManager.shared.modelPresent {
-            Task {
-                await ModelManager.shared.ensureLoaded()
-                activeSheet = .camera
-            }
-            return
-        }
-        aiBannerMsg = "⚠️ AI 识别未就绪：请先去「设置」下载端侧模型或配置云端 Key。"
-        showAiBanner = true
     }
 
     @MainActor
     private func runAiRecognize(_ data: Data) async {
-        try? await Task.sleep(nanoseconds: 300_000_000)
+        guard !aiBusy else {
+            AppLogger.shared.log(level: .warning, category: .ai, message: "已忽略重复的商品图片识别请求")
+            return
+        }
         aiBusy = true
-        capturedImageData = data
-        let prefer = VisionSettings.shared.preferOnDevice
-        let cloudReady = VisionSettings.shared.cloudReady
+        defer { aiBusy = false }
 
-        if prefer && !OnDeviceVisionEngine.shared.loadSuccess {
-            await ModelManager.shared.ensureLoaded()
+        let outcome: VisionRecognitionOutcome
+        do {
+            outcome = try await VisionRecognitionPipeline(context: ctx).recognize(rawImageData: data)
+            capturedOutcome = outcome
+        } catch {
+            AppLogger.shared.log(level: .error, category: .ai, message: "商品图片识别流程失败", details: error.localizedDescription)
+            return
         }
-
-        var result: RecognitionResult
-        if prefer {
-            if OnDeviceVisionEngine.shared.onDeviceUsable {
-                result = await OnDeviceVisionEngine.shared.recognize(imageData: data)
-            } else if cloudReady {
-                result = await CloudVisionEngine().recognize(RecognitionInput(visionImage: data), context: ctx)
-            } else {
-                result = RecognitionResult(confidence: 0, mode: .vision, needsLearning: true, recognizedName: nil)
-            }
-        } else {
-            if cloudReady {
-                result = await CloudVisionEngine().recognize(RecognitionInput(visionImage: data), context: ctx)
-            } else if OnDeviceVisionEngine.shared.onDeviceUsable {
-                result = await OnDeviceVisionEngine.shared.recognize(imageData: data)
-            } else {
-                result = RecognitionResult(confidence: 0, mode: .vision, needsLearning: true, recognizedName: nil)
-            }
-        }
-        aiBusy = false
+        let result = outcome.result
 
         if let name = result.recognizedName, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             skuName = name
@@ -311,22 +300,31 @@ struct SKUFormView: View {
         }
     }
 
-    private func saveFeatureSample(image: Data, sku: RawMaterialSKU, unit: PackagingUnit?, name: String?) {
-        let fm = FileManager.default
-        let dir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("feature_samples", isDirectory: true)
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        let path = dir.appendingPathComponent("\(UUID().uuidString).jpg")
-        try? image.write(to: path)
-
-        let text = name ?? sku.skuName
-        let textEmbeddingVec = LocalFeatureEngine.generateTextEmbedding(text)
-        let textData = LocalFeatureEngine.toData(textEmbeddingVec)
-
-        let sample = FeatureSample(angleTag: "FRONT", ocrTextContent: text,
-                                   sampleImagePath: path.path, unit: unit, sku: sku)
-        sample.textEmbedding = textData
-        ctx.insert(sample)
-        try? ctx.save()
+    private func saveFeatureSample(
+        outcome: VisionRecognitionOutcome,
+        sku: RawMaterialSKU,
+        unit: PackagingUnit?,
+        name: String?
+    ) {
+        guard let embedding = outcome.embedding else {
+            AppLogger.shared.log(
+                level: .error,
+                category: .store,
+                message: "未保存商品图片特征",
+                details: "本次识别没有生成有效的 MobileCLIP 向量"
+            )
+            return
+        }
+        do {
+            try FeatureRepository(context: ctx).saveSample(
+                image: outcome.processedImage,
+                embedding: embedding,
+                ocrText: name ?? sku.skuName,
+                unit: unit,
+                sku: sku
+            )
+        } catch {
+            AppLogger.shared.log(level: .error, category: .store, message: "商品图片特征保存失败", details: error.localizedDescription)
+        }
     }
 }

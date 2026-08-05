@@ -62,22 +62,41 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ios-app/Frameworks/llama.xcframework
-          key: llama-xcframework-${{ steps.cachekey.outputs.llamacpp_commit }}-${{ steps.cachekey.outputs.xcode_version }}-${{ steps.cachekey.outputs.script_hash }}
+          key: llama-xcframework-ios-universal-${{ steps.cachekey.outputs.llamacpp_commit }}-${{ steps.cachekey.outputs.xcode_version }}-${{ steps.cachekey.outputs.script_hash }}
           restore-keys: |
-            llama-xcframework-${{ steps.cachekey.outputs.llamacpp_commit }}-
+            llama-xcframework-ios-universal-${{ steps.cachekey.outputs.llamacpp_commit }}-
 
       - name: 构建 llama.xcframework（缓存未命中时）
         if: steps.cache-xcframework.outputs.cache-hit != 'true'
         working-directory: ios-app
         run: |
           set -euo pipefail
-          # 只构建 device (arm64) 切片：IPA 仅用于真机侧载，体积更小、构建更快。
-          # 本地若要跑模拟器调试，手动执行 MINIMAL_MODE=ios ./scripts/build_xcframework.sh
-          MINIMAL_MODE=ios-device ./scripts/build_xcframework.sh
+          # 同时构建 device + simulator：归档使用真机切片，单元测试使用模拟器切片。
+          MINIMAL_MODE=ios ./scripts/build_xcframework.sh
 
       - name: Generate Xcode project from project.yml
         working-directory: ios-app
         run: xcodegen generate
+
+      - name: Run unit tests
+        working-directory: ios-app
+        run: |
+          set -euo pipefail
+          SIMULATOR_ID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          iphones = [d for runtime in devices.values() for d in runtime if d.get("isAvailable") and d["name"].startswith("iPhone")]
+          if not iphones:
+              raise SystemExit("No available iPhone simulator")
+          print(iphones[0]["udid"])
+          ')
+          xcodebuild test \
+            -project StockInventoryApp.xcodeproj \
+            -scheme StockInventoryApp \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO
 
       - name: Archive (no code signing)
         working-directory: ios-app
@@ -105,6 +124,18 @@ jobs:
               || { echo "::error::$key missing from bundle Info.plist!"; exit 1; }
           done
           echo "Info.plist 隐私权限键校验通过"
+
+      - name: Assert MobileCLIP 模型已编译进 App
+        working-directory: ios-app
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find build/StockInventoryApp.xcarchive/Products -name '*.app' | head -n 1)
+          MODEL_PATH=$(find "$APP_PATH" -name 'mobileclip_s0_image.mlmodelc' -type d | head -n 1)
+          test -n "$MODEL_PATH" || { echo "::error::MobileCLIP compiled model missing from app bundle"; exit 1; }
+          MODEL_KB=$(du -sk "$MODEL_PATH" | awk '{print $1}')
+          test "$MODEL_KB" -gt 10000 \
+            || { echo "::error::MobileCLIP compiled model bundle is unexpectedly small: ${MODEL_KB}KB"; exit 1; }
+          du -sh "$MODEL_PATH"
 
       - name: Package unsigned IPA
         working-directory: ios-app
@@ -193,16 +224,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ios-app/Frameworks/llama.xcframework
-          key: llama-xcframework-${{ steps.cachekey.outputs.llamacpp_commit }}-${{ steps.cachekey.outputs.xcode_version }}-${{ steps.cachekey.outputs.script_hash }}
+          key: llama-xcframework-ios-universal-${{ steps.cachekey.outputs.llamacpp_commit }}-${{ steps.cachekey.outputs.xcode_version }}-${{ steps.cachekey.outputs.script_hash }}
           restore-keys: |
-            llama-xcframework-${{ steps.cachekey.outputs.llamacpp_commit }}-
+            llama-xcframework-ios-universal-${{ steps.cachekey.outputs.llamacpp_commit }}-
 
       - name: 构建 llama.xcframework（缓存未命中时）
         if: steps.cache-xcframework.outputs.cache-hit != 'true'
         working-directory: ios-app
         run: |
           set -euo pipefail
-          MINIMAL_MODE=ios-device ./scripts/build_xcframework.sh
+          MINIMAL_MODE=ios ./scripts/build_xcframework.sh
 
       - name: Install XcodeGen
         run: brew install xcodegen

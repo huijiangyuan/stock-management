@@ -1,206 +1,351 @@
-import SwiftUI
 import AVFoundation
+@preconcurrency import NextLevel
+import SwiftUI
+import UIKit
 
-/// 拍照视图（AVFoundation 静态拍照，区别于条码扫码）。拍下后回调 JPEG Data。
+/// NextLevel 静态拍照入口。图片回调发生前会先停止相机会话，降低随后模型推理的内存峰值。
 struct CameraCaptureView: View {
-    var onCaptured: (Data) -> Void
+    let onCaptured: (Data) -> Void
+
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        LuminaCameraView(onCaptured: onCaptured)
-            .ignoresSafeArea()
+        NextLevelCameraRepresentable(
+            onCaptured: { data in
+                dismiss()
+                onCaptured(data)
+            },
+            onCancel: {
+                dismiss()
+            }
+        )
+        .ignoresSafeArea()
     }
 }
 
-protocol CameraVCDelegate: AnyObject {
-    func didCapture(_ data: Data)
+private struct NextLevelCameraRepresentable: UIViewControllerRepresentable {
+    let onCaptured: (Data) -> Void
+    let onCancel: () -> Void
+
+    func makeUIViewController(context: Context) -> NextLevelCameraViewController {
+        let controller = NextLevelCameraViewController()
+        controller.onCaptured = onCaptured
+        controller.onCancel = onCancel
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: NextLevelCameraViewController, context: Context) {}
 }
 
-final class CameraVC: UIViewController, AVCapturePhotoCaptureDelegate {
-    weak var delegate: CameraVCDelegate?
-    private var session: AVCaptureSession?
-    private var output: AVCapturePhotoOutput?
-    private var preview: AVCaptureVideoPreviewLayer?
-    private let queue = DispatchQueue(label: "camera.capture.queue")
+private final class NextLevelCameraViewController: UIViewController {
+    enum State: Equatable {
+        case idle
+        case starting
+        case running
+        case capturing
+        case stopping
+        case finished
+    }
+
+    var onCaptured: ((Data) -> Void)?
+    var onCancel: (() -> Void)?
+
+    private let camera = NextLevel.shared
+    private let captureButton = UIButton(type: .system)
+    private let statusLabel = UILabel()
+    private var state: State = .idle
+    private var pendingPhotoData: Data?
+    private var shouldCancelAfterStop = false
+    private var shouldRestartAfterStop = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
-        title = "拍照识别"
-        setupNavigationBar()
-        setupCapture()
-        addCaptureButton()
-        addTopCloseButton()
-    }
-
-    private func setupNavigationBar() {
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "取消", style: .done,
-            target: self, action: #selector(close)
-        )
-    }
-
-    @objc private func close() { dismiss(animated: true) }
-
-    private func setupCapture() {
-        let status = AVCaptureDevice.authorizationStatus(for: .video)
-        switch status {
-        case .authorized:
-            beginCapture()
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                guard granted else { return }
-                DispatchQueue.main.async { self?.beginCapture() }
-            }
-        case .denied, .restricted:
-            showCameraDeniedAlert()
-        @unknown default:
-            break
-        }
-    }
-
-    private func beginCapture() {
-        guard session == nil else { return }
-        guard let device = AVCaptureDevice.default(for: .video) else {
-            showErrorAlert(title: "无法开启相机", message: "未检测到摄像头设备，请改用「扫码识别」或手动选择原材料。")
-            return
-        }
-        let input: AVCaptureDeviceInput
-        do {
-            input = try AVCaptureDeviceInput(device: device)
-        } catch {
-            showErrorAlert(title: "无法开启相机", message: "相机输入初始化失败：\(error.localizedDescription)")
-            return
-        }
-        let session = AVCaptureSession()
-        session.beginConfiguration()
-        session.sessionPreset = .photo
-
-        if session.canAddInput(input) {
-            session.addInput(input)
-        } else {
-            session.commitConfiguration()
-            showErrorAlert(title: "无法开启相机", message: "相机会话输入配置失败。")
-            return
-        }
-
-        let output = AVCapturePhotoOutput()
-        if session.canAddOutput(output) {
-            session.addOutput(output)
-        } else {
-            session.commitConfiguration()
-            showErrorAlert(title: "无法开启相机", message: "相机会话输出配置失败。")
-            return
-        }
-
-        session.commitConfiguration()
-
-        self.session = session
-        self.output = output
-        let preview = AVCaptureVideoPreviewLayer(session: session)
-        preview.videoGravity = .resizeAspectFill
-        preview.frame = view.layer.bounds
-        view.layer.insertSublayer(preview, at: 0)
-        self.preview = preview
-        queue.async { session.startRunning() }
-    }
-
-    private func showErrorAlert(title: String, message: String) {
-        Task { @MainActor in
-            AppLogger.shared.log(level: .error, category: .camera, message: title, details: message)
-        }
-        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "知道了", style: .default))
-        present(alert, animated: true)
-    }
-
-    private func showCameraDeniedAlert() {
-        Task { @MainActor in
-            AppLogger.shared.log(level: .warning, category: .camera, message: "相机权限未授权", details: "用户拒绝或权限未确定")
-        }
-        let alert = UIAlertController(
-            title: "需要相机权限",
-            message: "请在「设置 → 库存管理」中开启相机权限，以使用拍照 AI 识别。",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "去设置", style: .default) { _ in
-            if let url = URL(string: UIApplication.openSettingsURLString) {
-                UIApplication.shared.open(url)
-            }
-        })
-        present(alert, animated: true)
-    }
-
-    private func addTopCloseButton() {
-        let btn = UIButton(type: .system)
-        btn.setTitle("✕ 取消", for: .normal)
-        btn.setTitleColor(.white, for: .normal)
-        btn.titleLabel?.font = .systemFont(ofSize: 15, weight: .medium)
-        btn.backgroundColor = UIColor(white: 0, alpha: 0.5)
-        btn.layer.cornerRadius = 14
-        btn.contentEdgeInsets = UIEdgeInsets(top: 6, left: 14, bottom: 6, right: 14)
-        btn.translatesAutoresizingMaskIntoConstraints = false
-        btn.addTarget(self, action: #selector(close), for: .touchUpInside)
-        view.addSubview(btn)
-        NSLayoutConstraint.activate([
-            btn.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
-            btn.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
-        ])
-    }
-
-    private func addCaptureButton() {
-        let btn = UIButton(type: .system)
-        btn.setTitle("📷 拍照", for: .normal)
-        btn.setTitleColor(.white, for: .normal)
-        btn.titleLabel?.font = .systemFont(ofSize: 18, weight: .semibold)
-        btn.backgroundColor = UIColor(white: 0, alpha: 0.6)
-        btn.layer.cornerRadius = 32
-        btn.translatesAutoresizingMaskIntoConstraints = false
-        btn.addTarget(self, action: #selector(shoot), for: .touchUpInside)
-        view.addSubview(btn)
-        NSLayoutConstraint.activate([
-            btn.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            btn.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -28),
-            btn.widthAnchor.constraint(equalToConstant: 64),
-            btn.heightAnchor.constraint(equalToConstant: 64)
-        ])
-    }
-
-    @objc private func shoot() {
-        guard let output else { return }
-        let settings = AVCapturePhotoSettings()
-        output.capturePhoto(with: settings, delegate: self)
-    }
-
-    func photoOutput(_ output: AVCapturePhotoOutput,
-                     didFinishProcessingPhoto photo: AVCapturePhoto,
-                     error: Error?) {
-        guard error == nil, let data = photo.fileDataRepresentation() else { return }
-        queue.async { [weak self] in
-            self?.session?.stopRunning()
-        }
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let smallData = self?.downscaleImageData(data, maxSide: 800) ?? data
-            DispatchQueue.main.async {
-                self?.delegate?.didCapture(smallData)
-            }
-        }
-    }
-
-    private func downscaleImageData(_ data: Data, maxSide: CGFloat = 800) -> Data {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return data }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxSide,
-            kCGImageSourceCreateThumbnailWithTransform: true
-        ]
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return data }
-        let uiImage = UIImage(cgImage: cgImage)
-        return uiImage.jpegData(compressionQuality: 0.6) ?? data
+        configureInterface()
+        configureCamera()
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        preview?.frame = view.layer.bounds
+        camera.previewLayer.frame = view.layer.bounds
     }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if state != .finished {
+            camera.stop()
+            releaseDelegates()
+        }
+    }
+
+    private func configureCamera() {
+        camera.delegate = self
+        camera.photoDelegate = self
+        camera.captureMode = .photo
+        camera.devicePosition = .back
+        camera.photoConfiguration.preset = .photo
+        camera.photoConfiguration.codec = .jpeg
+        camera.photoConfiguration.isHighResolutionEnabled = false
+        camera.photoConfiguration.photoQualityPrioritization = .balanced
+        camera.previewLayer.videoGravity = .resizeAspectFill
+        view.layer.insertSublayer(camera.previewLayer, at: 0)
+
+        switch NextLevel.authorizationStatus(forMediaType: .video) {
+        case .authorized:
+            startCamera()
+        case .notDetermined:
+            state = .starting
+            statusLabel.text = "正在请求相机权限…"
+            NextLevel.requestAuthorization(forMediaType: .video) { [weak self] _, status in
+                guard let self else { return }
+                if status == .authorized {
+                    self.startCamera()
+                } else {
+                    self.presentPermissionDeniedAlert()
+                }
+            }
+        case .notAuthorized:
+            presentPermissionDeniedAlert()
+        }
+    }
+
+    private func startCamera() {
+        guard state == .idle || state == .starting else { return }
+        state = .starting
+        statusLabel.text = "正在启动相机…"
+        do {
+            try camera.start()
+            AppLogger.shared.log(level: .info, category: .camera, message: "NextLevel 相机会话开始启动")
+        } catch NextLevelError.started {
+            if camera.isRunning {
+                nextLevelSessionDidStart(camera)
+            } else {
+                shouldRestartAfterStop = true
+                state = .stopping
+                statusLabel.text = "正在重置相机会话…"
+                camera.stop()
+            }
+        } catch {
+            state = .idle
+            presentError(title: "无法启动相机", error: error)
+        }
+    }
+
+    @objc private func capturePhoto() {
+        guard state == .running, camera.canCapturePhoto else {
+            AppLogger.shared.log(
+                level: .warning,
+                category: .camera,
+                message: "相机尚未准备好拍照",
+                details: "state=\(state), canCapturePhoto=\(camera.canCapturePhoto)"
+            )
+            return
+        }
+        state = .capturing
+        captureButton.isEnabled = false
+        statusLabel.text = "正在拍照…"
+        camera.capturePhoto()
+    }
+
+    @objc private func cancel() {
+        guard state != .finished else { return }
+        shouldRestartAfterStop = false
+        shouldCancelAfterStop = true
+        stopSessionAndComplete()
+    }
+
+    @objc private func focus(_ recognizer: UITapGestureRecognizer) {
+        guard state == .running else { return }
+        let point = recognizer.location(in: view)
+        let adjustedPoint = camera.previewLayer.captureDevicePointConverted(fromLayerPoint: point)
+        camera.focusExposeAndAdjustWhiteBalance(atAdjustedPoint: adjustedPoint)
+    }
+
+    private func stopSessionAndComplete() {
+        guard state != .finished else { return }
+        let wasRunning = camera.isRunning
+        state = .stopping
+        statusLabel.text = "正在释放相机资源…"
+        camera.stop()
+        if !wasRunning {
+            complete()
+        }
+    }
+
+    private func complete() {
+        guard state != .finished else { return }
+        state = .finished
+        releaseDelegates()
+
+        if let data = pendingPhotoData {
+            AppLogger.shared.log(
+                level: .info,
+                category: .camera,
+                message: "NextLevel 完成静态拍照并释放相机会话",
+                details: "原图数据 \(data.count / 1_024) KB"
+            )
+            onCaptured?(data)
+        } else if shouldCancelAfterStop {
+            onCancel?()
+        }
+    }
+
+    private func releaseDelegates() {
+        if camera.delegate === self { camera.delegate = nil }
+        if camera.photoDelegate === self { camera.photoDelegate = nil }
+    }
+
+    private func configureInterface() {
+        let closeButton = UIButton(type: .system)
+        closeButton.configuration = .filled()
+        closeButton.configuration?.title = "取消"
+        closeButton.configuration?.image = UIImage(systemName: "xmark")
+        closeButton.configuration?.imagePadding = 6
+        closeButton.configuration?.baseBackgroundColor = UIColor.black.withAlphaComponent(0.55)
+        closeButton.configuration?.baseForegroundColor = .white
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.addTarget(self, action: #selector(cancel), for: .touchUpInside)
+
+        captureButton.configuration = .filled()
+        captureButton.configuration?.image = UIImage(systemName: "camera.fill")
+        captureButton.configuration?.baseBackgroundColor = .white
+        captureButton.configuration?.baseForegroundColor = .black
+        captureButton.configuration?.cornerStyle = .capsule
+        captureButton.translatesAutoresizingMaskIntoConstraints = false
+        captureButton.isEnabled = false
+        captureButton.addTarget(self, action: #selector(capturePhoto), for: .touchUpInside)
+
+        statusLabel.text = "正在准备相机…"
+        statusLabel.textColor = .white
+        statusLabel.font = .preferredFont(forTextStyle: .subheadline)
+        statusLabel.textAlignment = .center
+        statusLabel.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        statusLabel.layer.cornerRadius = 10
+        statusLabel.clipsToBounds = true
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        view.addSubview(closeButton)
+        view.addSubview(captureButton)
+        view.addSubview(statusLabel)
+        view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(focus(_:))))
+
+        NSLayoutConstraint.activate([
+            closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            captureButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            captureButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -28),
+            captureButton.widthAnchor.constraint(equalToConstant: 72),
+            captureButton.heightAnchor.constraint(equalToConstant: 72),
+            statusLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            statusLabel.bottomAnchor.constraint(equalTo: captureButton.topAnchor, constant: -18),
+            statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
+            statusLabel.heightAnchor.constraint(equalToConstant: 36)
+        ])
+    }
+
+    private func presentError(title: String, error: Error) {
+        AppLogger.shared.log(level: .error, category: .camera, message: title, details: error.localizedDescription)
+        let alert = UIAlertController(title: title, message: error.localizedDescription, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "关闭", style: .cancel) { [weak self] _ in self?.cancel() })
+        present(alert, animated: true)
+    }
+
+    private func presentPermissionDeniedAlert() {
+        state = .idle
+        AppLogger.shared.log(level: .warning, category: .camera, message: "相机权限未授权")
+        let alert = UIAlertController(
+            title: "需要相机权限",
+            message: "请在「设置 → 库存管理」中开启相机权限。",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel) { [weak self] _ in self?.cancel() })
+        alert.addAction(UIAlertAction(title: "去设置", style: .default) { _ in
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(url)
+        })
+        present(alert, animated: true)
+    }
+}
+
+extension NextLevelCameraViewController: NextLevelDelegate {
+    func nextLevelSessionWillStart(_ nextLevel: NextLevel) {}
+
+    func nextLevelSessionDidStart(_ nextLevel: NextLevel) {
+        guard state == .starting else { return }
+        state = .running
+        captureButton.isEnabled = true
+        statusLabel.text = "点击画面可对焦"
+        AppLogger.shared.log(level: .info, category: .camera, message: "NextLevel 相机会话已就绪")
+    }
+
+    func nextLevelSessionDidStop(_ nextLevel: NextLevel) {
+        if shouldRestartAfterStop {
+            shouldRestartAfterStop = false
+            state = .idle
+            startCamera()
+            return
+        }
+        if state == .stopping {
+            complete()
+        }
+    }
+
+    func nextLevelSessionWasInterrupted(_ nextLevel: NextLevel) {
+        captureButton.isEnabled = false
+        statusLabel.text = "相机会话被中断"
+        AppLogger.shared.log(level: .warning, category: .camera, message: "NextLevel 相机会话被中断")
+    }
+
+    func nextLevelSessionInterruptionEnded(_ nextLevel: NextLevel) {
+        statusLabel.text = "相机会话恢复中…"
+        AppLogger.shared.log(level: .info, category: .camera, message: "NextLevel 相机会话中断已结束")
+    }
+
+    func nextLevel(_ nextLevel: NextLevel, didUpdateVideoConfiguration videoConfiguration: NextLevelVideoConfiguration) {}
+    func nextLevel(_ nextLevel: NextLevel, didUpdateAudioConfiguration audioConfiguration: NextLevelAudioConfiguration) {}
+    func nextLevelCaptureModeWillChange(_ nextLevel: NextLevel) {}
+    func nextLevelCaptureModeDidChange(_ nextLevel: NextLevel) {}
+}
+
+extension NextLevelCameraViewController: NextLevelPhotoDelegate {
+    func nextLevel(
+        _ nextLevel: NextLevel,
+        output: AVCapturePhotoOutput,
+        willBeginCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
+        photoConfiguration: NextLevelPhotoConfiguration
+    ) {}
+
+    func nextLevel(
+        _ nextLevel: NextLevel,
+        output: AVCapturePhotoOutput,
+        willCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings,
+        photoConfiguration: NextLevelPhotoConfiguration
+    ) {}
+
+    func nextLevel(
+        _ nextLevel: NextLevel,
+        output: AVCapturePhotoOutput,
+        didCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings,
+        photoConfiguration: NextLevelPhotoConfiguration
+    ) {}
+
+    func nextLevel(
+        _ nextLevel: NextLevel,
+        didFinishProcessingPhoto photo: AVCapturePhoto,
+        photoDict: [String: Any],
+        photoConfiguration: NextLevelPhotoConfiguration
+    ) {
+        guard state == .capturing else { return }
+        guard let data = photoDict[NextLevelPhotoFileDataKey] as? Data else {
+            state = .running
+            captureButton.isEnabled = true
+            statusLabel.text = "拍照失败，请重试"
+            AppLogger.shared.log(level: .error, category: .camera, message: "NextLevel 未返回有效照片数据")
+            return
+        }
+        pendingPhotoData = data
+        stopSessionAndComplete()
+    }
+
+    func nextLevelDidCompletePhotoCapture(_ nextLevel: NextLevel) {}
 }

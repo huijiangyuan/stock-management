@@ -45,6 +45,21 @@ struct RecognitionResult {
     }
 }
 
+enum VisionRecognitionSource: String, Sendable {
+    case vector = "本地图片向量"
+    case miniCPM = "端侧 MiniCPM-V"
+    case cloud = "云端 VLM"
+    case unavailable = "未识别"
+}
+
+struct VisionRecognitionOutcome {
+    let result: RecognitionResult
+    let processedImage: ProcessedCapturedImage
+    let embedding: ImageEmbedding?
+    let matches: [FeatureMatch]
+    let source: VisionRecognitionSource
+}
+
 /// 可插拔识别引擎协议。条码 / 手动 / 视觉（云端 VLM）统一走 recognize。
 /// 视觉识别必须异步（网络调用），故协议方法为 async。
 protocol RecognitionEngine {

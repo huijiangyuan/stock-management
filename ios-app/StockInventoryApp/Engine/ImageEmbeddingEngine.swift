@@ -9,12 +9,14 @@ struct ImageEmbedding: Sendable, Equatable {
     var dimension: Int { values.count }
 }
 
-protocol ImageEmbeddingProviding {
+protocol ImageEmbeddingProviding: Actor {
     func embed(imageData: Data) async throws -> ImageEmbedding
 }
 
 /// Apple MobileCLIP-S0 图片编码器。模型只加载一次，并在独立 actor 中串行执行，避免与 VLM 抢占内存。
 actor MobileCLIPEmbeddingEngine: ImageEmbeddingProviding {
+    static let shared = MobileCLIPEmbeddingEngine()
+
     enum EmbeddingError: LocalizedError {
         case modelResourceMissing
         case featureOutputMissing

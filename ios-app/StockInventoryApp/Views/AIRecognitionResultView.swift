@@ -9,8 +9,7 @@
 import SwiftUI
 
 struct AIRecognitionResultView: View {
-    let result: RecognitionResult
-    let imageData: Data
+    let outcome: VisionRecognitionOutcome
     /// 采纳识别结果并自动填表
     let onConfirm: () -> Void
     /// 一键快捷创建材料底库并选定为当前单据材料
@@ -25,22 +24,22 @@ struct AIRecognitionResultView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var inputName: String = ""
 
-    init(result: RecognitionResult,
-         imageData: Data,
+    init(outcome: VisionRecognitionOutcome,
          onConfirm: @escaping () -> Void,
          onQuickAdd: @escaping (String) -> Void,
          onLearn: @escaping () -> Void,
          onManual: @escaping () -> Void,
          onRetake: @escaping () -> Void) {
-        self.result = result
-        self.imageData = imageData
+        self.outcome = outcome
         self.onConfirm = onConfirm
         self.onQuickAdd = onQuickAdd
         self.onLearn = onLearn
         self.onManual = onManual
         self.onRetake = onRetake
-        _inputName = State(initialValue: result.recognizedName ?? "")
+        _inputName = State(initialValue: outcome.result.recognizedName ?? "")
     }
+
+    private var result: RecognitionResult { outcome.result }
 
     // 置信度颜色
     private var confidenceColor: Color {
@@ -57,7 +56,7 @@ struct AIRecognitionResultView: View {
     }
 
     private var image: UIImage? {
-        UIImage(data: imageData)
+        UIImage(data: outcome.processedImage.jpegData)
     }
 
     var body: some View {
@@ -141,6 +140,48 @@ struct AIRecognitionResultView: View {
                             Label("商品库比对", systemImage: "magnifyingglass.circle")
                                 .font(.subheadline).fontWeight(.semibold)
                                 .padding(.bottom, 2)
+                            HStack {
+                                Text("识别来源")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text(outcome.source.rawValue)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.brand)
+                            }
+                            if !outcome.matches.isEmpty {
+                                Divider()
+                                Text("图片向量 Top \(outcome.matches.count)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                ForEach(outcome.matches.indices, id: \.self) { index in
+                                    let match = outcome.matches[index]
+                                    if let candidate = match.sample.sku {
+                                        HStack(spacing: AppSpacing.s1) {
+                                            Text("\(index + 1)")
+                                                .font(.caption2.bold())
+                                                .foregroundColor(.white)
+                                                .frame(width: 20, height: 20)
+                                                .background(Color.brand)
+                                                .clipShape(Circle())
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(candidate.skuName)
+                                                    .font(.subheadline)
+                                                    .fontWeight(.medium)
+                                                Text(candidate.skuCode)
+                                                    .font(.caption2)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            Spacer()
+                                            Text("\(Int(match.similarity * 100))%")
+                                                .font(.caption.monospacedDigit())
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                }
+                                Divider()
+                            }
                             if let sku = result.sku {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 4) {

@@ -8,8 +8,14 @@ struct ProcessedCapturedImage: Sendable, Equatable {
     let pixelHeight: Int
 }
 
+protocol CapturedImageProcessing: Actor {
+    func process(_ imageData: Data) throws -> ProcessedCapturedImage
+}
+
 /// 将相机原图一次性解码、按 EXIF 方向旋转并缩放，供向量模型与 VLM 复用同一份数据。
-actor CapturedImageProcessor {
+actor CapturedImageProcessor: CapturedImageProcessing {
+    static let shared = CapturedImageProcessor()
+
     enum ProcessingError: LocalizedError, Equatable {
         case invalidImageData
         case thumbnailCreationFailed

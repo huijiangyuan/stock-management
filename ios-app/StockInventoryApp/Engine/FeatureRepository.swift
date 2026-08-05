@@ -7,7 +7,12 @@ struct FeatureMatch {
 }
 
 @MainActor
-final class FeatureRepository {
+protocol FeatureSearching: AnyObject {
+    func topMatches(queryVector: [Float], modelVersion: String, topK: Int) throws -> [FeatureMatch]
+}
+
+@MainActor
+final class FeatureRepository: FeatureSearching {
     enum RepositoryError: LocalizedError {
         case invalidQueryVector
 

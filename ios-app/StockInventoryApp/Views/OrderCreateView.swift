@@ -21,7 +21,7 @@ struct OrderCreateView: View {
         case scanner
         case camera
         case learn(barcode: String?, prefillName: String?)
-        case visionResult(RecognitionResult, Data)
+        case visionResult(VisionRecognitionOutcome)
         case settings
         case modelManager
 
@@ -39,20 +39,15 @@ struct OrderCreateView: View {
     }
 
     @State private var activeSheet: ActiveSheet?
+    @State private var deferredSheet: ActiveSheet?
+    @State private var pendingCameraData: Data?
     @State private var lastMode: RecognitionMode = .manual
 
     // AI 视觉识别相关
     @State private var visionBusy = false
-    @State private var visionImageData: Data?
+    @State private var latestVisionOutcome: VisionRecognitionOutcome?
     @State private var visionResultName: String?
     @State private var visionConfidence: Double = 0
-    @State private var visionMessage: String?
-    @State private var showVisionMsg = false
-
-    // 前置检查 Alert
-    @State private var showModelLoadGuide = false
-    @State private var showModelDownloadGuide = false
-
     // 提交失败 Alert
     @State private var showSubmitErrorAlert = false
     @State private var submitErrorMessage = ""
@@ -188,15 +183,7 @@ struct OrderCreateView: View {
                 Button("取消") { dismiss() }
                 Button("生成单据") { submit() }.disabled(!canSubmit)
             }
-            .onAppear {
-                Task {
-                    // 后台静默预热端侧 AI 模型
-                    if ModelManager.shared.modelPresent && !ModelManager.shared.loaded {
-                        await ModelManager.shared.ensureLoaded()
-                    }
-                }
-            }
-            .sheet(item: $activeSheet) { sheet in
+            .sheet(item: $activeSheet, onDismiss: handleSheetDismissed) { sheet in
                 switch sheet {
                 case .skuPicker:
                     SKUPickerSheet(selected: $selectedSKU)
@@ -206,35 +193,30 @@ struct OrderCreateView: View {
                     }
                 case .camera:
                     CameraCaptureView { data in
-                        // 直接在相机回调中启动识别并无缝转换 activeSheet，绝不先行触发 activeSheet = nil
-                        // 彻底杜绝 UIKit presentation dismiss 向上冒泡连带关闭 OrderCreateView 模态页
-                        Task { @MainActor in
-                            await runVisionAndTransition(data)
-                        }
+                        pendingCameraData = data
                     }
                 case .learn(let barcode, let prefillName):
                     SKUFormView(initialBarcode: barcode, initialName: prefillName, onSaved: { newSKU in
                         selectedSKU = newSKU
                         selectedUnit = newSKU.packagingUnits.first
                     })
-                case .visionResult(let result, let data):
+                case .visionResult(let outcome):
                     AIRecognitionResultView(
-                        result: result,
-                        imageData: data,
+                        outcome: outcome,
                         onConfirm: {
-                            applyVisionConfirmed(result)
+                            applyVisionConfirmed(outcome)
                         },
                         onQuickAdd: { name in
-                            quickAddSKUAndSelect(name: name, imageData: data)
+                            quickAddSKUAndSelect(name: name, outcome: outcome)
                         },
                         onLearn: {
-                            activeSheet = .learn(barcode: nil, prefillName: result.recognizedName)
+                            deferredSheet = .learn(barcode: nil, prefillName: outcome.result.recognizedName)
                         },
                         onManual: {
-                            activeSheet = .skuPicker
+                            deferredSheet = .skuPicker
                         },
                         onRetake: {
-                            activeSheet = .camera
+                            deferredSheet = .camera
                         }
                     )
                 case .settings:
@@ -266,37 +248,6 @@ struct OrderCreateView: View {
                 let skipped = inStockBatches.prefix(while: { $0.batchId != (pendingBatch?.batchId ?? "") })
                                           .map { $0.batchNo }
                 Text("所选批次并非最早可出库批次，将跳过更早批次：\(skipped.joined(separator: "、"))。是否仍按该批次出库？")
-            }
-            .alert("模型未加载", isPresented: $showModelLoadGuide) {
-                Button("前往设置加载模型", role: .none) {
-                    activeSheet = .modelManager
-                }
-                Button("尝试使用云端识别") {
-                    if VisionSettings.shared.cloudReady {
-                        activeSheet = .camera
-                    } else {
-                        activeSheet = .settings
-                    }
-                }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("端侧 MiniCPM-V 4.6 模型已下载但尚未加载。请前往「设置 -> 端侧 AI 模型」完成加载；或配置云端 VLM API Key 使用云端识别。")
-            }
-            .alert("AI 识别未就绪", isPresented: $showModelDownloadGuide) {
-                Button("前往设置", role: .none) {
-                    activeSheet = .settings
-                }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("尚未准备好 AI 识别：端侧模型未下载，云端 VLM 也未配置 API Key。可前往「设置」下载端侧模型或配置云端 API Key。")
-            }
-            .alert("提示", isPresented: $showVisionMsg) {
-                Button("前往设置", role: .none) {
-                    activeSheet = .settings
-                }
-                Button("知道了", role: .cancel) {}
-            } message: {
-                Text(visionMessage ?? "")
             }
             .alert("单据生成失败", isPresented: $showSubmitErrorAlert) {
                 Button("知道了", role: .cancel) {}
@@ -355,24 +306,7 @@ struct OrderCreateView: View {
     }
 
     private func handleAIRecognizeTap() {
-        let settings = VisionSettings.shared
-        // 可用：端侧已就绪 or 云端配置了 Key
-        if OnDeviceVisionEngine.shared.onDeviceUsable || settings.cloudReady {
-            activeSheet = .camera
-            return
-        }
-        // 模型已下载但未加载：改为自动加载，避免用户感知繁琐操作
-        if ModelManager.shared.modelPresent && !ModelManager.shared.loaded {
-            Task {
-                await ModelManager.shared.load()
-                if OnDeviceVisionEngine.shared.onDeviceUsable {
-                    activeSheet = .camera
-                }
-            }
-            return
-        }
-        // 完全未下载且云端未配置
-        showModelDownloadGuide = true
+        activeSheet = .camera
     }
 
     private func submit() {
@@ -392,8 +326,8 @@ struct OrderCreateView: View {
             batch = selectedBatch
         }
 
-        if lastMode == .vision, let img = visionImageData {
-            saveFeatureSample(image: img, sku: sku, unit: unit, name: visionResultName)
+        if lastMode == .vision, let outcome = latestVisionOutcome {
+            saveFeatureSample(outcome: outcome, sku: sku, unit: unit, name: visionResultName)
         }
         let line = InventoryStore.OrderLine(sku: sku, unit: unit, batch: batch,
                                             operatingQty: qty, conversionRatio: unit.conversionRatio,
@@ -416,16 +350,16 @@ struct OrderCreateView: View {
 
             if onDevice && loaded {
                 Circle().fill(Color.green).frame(width: 8, height: 8)
-                Text("AI 引擎：端侧 MiniCPM-V 4.6 已就绪").font(.caption).foregroundColor(.secondary)
+                Text("AI：图片向量优先 · MiniCPM-V 兜底已就绪").font(.caption).foregroundColor(.secondary)
             } else if present && !loaded {
-                Circle().fill(Color.orange).frame(width: 8, height: 8)
-                Text("AI 引擎：端侧模型已下载(加载中...)").font(.caption).foregroundColor(.orange)
+                Circle().fill(Color.green).frame(width: 8, height: 8)
+                Text("AI：图片向量已就绪 · MiniCPM-V 按需加载").font(.caption).foregroundColor(.secondary)
             } else if cloud {
                 Circle().fill(Color.blue).frame(width: 8, height: 8)
-                Text("AI 引擎：云端 API 模式").font(.caption).foregroundColor(.secondary)
+                Text("AI：图片向量优先 · 云端 VLM 兜底").font(.caption).foregroundColor(.secondary)
             } else {
-                Circle().fill(Color.red).frame(width: 8, height: 8)
-                Text("AI 引擎：未就绪（无模型/未配置 API Key）").font(.caption).foregroundColor(.red)
+                Circle().fill(Color.green).frame(width: 8, height: 8)
+                Text("AI：图片向量已就绪 · 未命中时手动确认").font(.caption).foregroundColor(.secondary)
             }
         }
         .padding(.vertical, 2)
@@ -434,23 +368,44 @@ struct OrderCreateView: View {
     // MARK: - AI 视觉识别流程（三档：端侧优先 → 云端兜底 → 引导手动）
 
     @MainActor
-    private func runVisionAndTransition(_ data: Data) async {
-        visionBusy = true
-        visionImageData = data
-        let rawResult = await Task.detached(priority: .userInitiated) { [data] in
-            await self.resolveAndRecognize(data)
-        }.value
-        visionBusy = false
-
-        let processedResult = processVisionResult(rawResult)
-        
-        // 给 300ms 缓冲让相机会话 Dismiss 动画在 UIKit 呈现层彻底归零，绝不触发 Modal Collision 闪退
-        try? await Task.sleep(nanoseconds: 300_000_000)
-        activeSheet = .visionResult(processedResult, data)
+    private func handleSheetDismissed() {
+        if let data = pendingCameraData {
+            pendingCameraData = nil
+            Task { @MainActor in
+                await runVisionAndTransition(data)
+            }
+            return
+        }
+        if let next = deferredSheet {
+            deferredSheet = nil
+            activeSheet = next
+        }
     }
 
     @MainActor
-    private func quickAddSKUAndSelect(name: String, imageData: Data) {
+    private func runVisionAndTransition(_ data: Data) async {
+        guard !visionBusy else {
+            AppLogger.shared.log(level: .warning, category: .ai, message: "已忽略重复的图片识别请求")
+            return
+        }
+        visionBusy = true
+        defer { visionBusy = false }
+        do {
+            let outcome = try await VisionRecognitionPipeline(context: ctx).recognize(rawImageData: data)
+            latestVisionOutcome = outcome
+            activeSheet = .visionResult(outcome)
+        } catch {
+            AppLogger.shared.log(
+                level: .error,
+                category: .ai,
+                message: "AI 图片识别流程失败",
+                details: error.localizedDescription
+            )
+        }
+    }
+
+    @MainActor
+    private func quickAddSKUAndSelect(name: String, outcome: VisionRecognitionOutcome) {
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let skuName = cleanName.isEmpty ? "未命名新材料" : cleanName
         let randomSuffix = String(format: "%04d", Int.random(in: 1000...9999))
@@ -472,10 +427,15 @@ struct OrderCreateView: View {
             sku: newSKU
         )
         ctx.insert(baseUnitObj)
-        try? ctx.save()
+        do {
+            try ctx.save()
+        } catch {
+            AppLogger.shared.log(level: .error, category: .store, message: "快捷创建商品保存失败", details: error.localizedDescription)
+            return
+        }
 
         // 绑定该采样的特征向量
-        saveFeatureSample(image: imageData, sku: newSKU, unit: baseUnitObj, name: skuName)
+        saveFeatureSample(outcome: outcome, sku: newSKU, unit: baseUnitObj, name: skuName)
 
         // 自动设为当前单据在办材料
         selectedSKU = newSKU
@@ -487,66 +447,8 @@ struct OrderCreateView: View {
     }
 
     @MainActor
-    private func runVision(_ data: Data) async {
-        await runVisionAndTransition(data)
-    }
-
-    /// 按设置解析可用引擎：端侧优先（或云端不可用时）走本地 MiniCPM-V 4.6；
-    /// 否则回退云端 VLM；两者皆不可用时给出引导，绝不阻塞用户。
-    @MainActor
-    private func resolveAndRecognize(_ data: Data) async -> RecognitionResult {
-        let prefer = VisionSettings.shared.preferOnDevice
-        let cloudReady = VisionSettings.shared.cloudReady
-
-        if prefer && !OnDeviceVisionEngine.shared.loadSuccess {
-            await ModelManager.shared.ensureLoaded()
-        }
-        let onDevice = OnDeviceVisionEngine.shared.onDeviceUsable
-
-        if prefer {
-            if onDevice { return await OnDeviceVisionEngine.shared.recognize(imageData: data) }
-            if cloudReady { return await CloudVisionEngine().recognize(RecognitionInput(visionImage: data), context: ctx) }
-        } else {
-            if cloudReady { return await CloudVisionEngine().recognize(RecognitionInput(visionImage: data), context: ctx) }
-            if onDevice { return await OnDeviceVisionEngine.shared.recognize(imageData: data) }
-        }
-
-        return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true, recognizedName: nil)
-    }
-
-    private func processVisionResult(_ rawResult: RecognitionResult) -> RecognitionResult {
-        var res = rawResult
-        if res.sku == nil, let name = res.recognizedName {
-            if let matched = matchSKU(by: name) {
-                res = RecognitionResult(
-                    sku: matched,
-                    packagingUnit: matched.packagingUnits.first,
-                    confidence: res.confidence,
-                    mode: res.mode,
-                    needsLearning: res.needsLearning,
-                    recognizedName: res.recognizedName,
-                    productionDate: res.productionDate,
-                    expirationDate: res.expirationDate
-                )
-            } else if let localMatch = LocalFeatureEngine.searchBestMatch(ocrText: name, context: ctx) {
-                let sku = localMatch.sample.sku
-                res = RecognitionResult(
-                    sku: sku,
-                    packagingUnit: localMatch.sample.unit ?? sku?.packagingUnits.first,
-                    confidence: max(res.confidence, Double(localMatch.similarity)),
-                    mode: res.mode,
-                    needsLearning: localMatch.similarity < 0.65,
-                    recognizedName: name,
-                    productionDate: res.productionDate,
-                    expirationDate: res.expirationDate
-                )
-            }
-        }
-        return res
-    }
-
-    @MainActor
-    private func applyVisionConfirmed(_ result: RecognitionResult) {
+    private func applyVisionConfirmed(_ outcome: VisionRecognitionOutcome) {
+        let result = outcome.result
         if let sku = result.sku {
             selectedSKU = sku
             selectedUnit = result.packagingUnit ?? sku.packagingUnits.first
@@ -555,38 +457,37 @@ struct OrderCreateView: View {
             lastMode = .vision
             visionResultName = result.recognizedName
             visionConfidence = result.confidence
-        }
-    }
-
-    /// 按识别出的名称模糊匹配本地原材料（名称互含即命中）。
-    private func matchSKU(by name: String) -> RawMaterialSKU? {
-        let q = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return nil }
-        let all = (try? ctx.fetch(FetchDescriptor<RawMaterialSKU>())) ?? []
-        return all.first { sku in
-            sku.skuName.localizedCaseInsensitiveContains(q) ||
-            q.localizedCaseInsensitiveContains(sku.skuName)
+            latestVisionOutcome = outcome
         }
     }
 
     /// 识别确认入库后沉淀特征样本（为后续端侧向量比对攒数据）
-    private func saveFeatureSample(image: Data, sku: RawMaterialSKU, unit: PackagingUnit?, name: String?) {
-        let fm = FileManager.default
-        let dir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("feature_samples", isDirectory: true)
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        let path = dir.appendingPathComponent("\(UUID().uuidString).jpg")
-        try? image.write(to: path)
-
-        let text = name ?? sku.skuName
-        let textEmbeddingVec = LocalFeatureEngine.generateTextEmbedding(text)
-        let textData = LocalFeatureEngine.toData(textEmbeddingVec)
-
-        let sample = FeatureSample(angleTag: "FRONT", ocrTextContent: text,
-                                   sampleImagePath: path.path, unit: unit, sku: sku)
-        sample.textEmbedding = textData
-        ctx.insert(sample)
-        try? ctx.save()
+    private func saveFeatureSample(
+        outcome: VisionRecognitionOutcome,
+        sku: RawMaterialSKU,
+        unit: PackagingUnit?,
+        name: String?
+    ) {
+        guard let embedding = outcome.embedding else {
+            AppLogger.shared.log(
+                level: .error,
+                category: .store,
+                message: "未保存图片特征样本",
+                details: "本次识别没有生成有效的 MobileCLIP 向量"
+            )
+            return
+        }
+        do {
+            try FeatureRepository(context: ctx).saveSample(
+                image: outcome.processedImage,
+                embedding: embedding,
+                ocrText: name ?? sku.skuName,
+                unit: unit,
+                sku: sku
+            )
+        } catch {
+            AppLogger.shared.log(level: .error, category: .store, message: "图片特征样本保存失败", details: error.localizedDescription)
+        }
     }
 
     static func autoBatchNo(_ sku: RawMaterialSKU) -> String {

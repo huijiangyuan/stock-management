@@ -31,6 +31,14 @@ struct CloudVisionEngine: RecognitionEngine {
             let match = Self.matchSKU(name: raw.skuName, context: context)
             return Self.buildResult(raw: raw, sku: match)
         } catch {
+            await MainActor.run {
+                AppLogger.shared.log(
+                    level: .error,
+                    category: .network,
+                    message: "云端 VLM 识别失败",
+                    details: error.localizedDescription
+                )
+            }
             return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true)
         }
     }

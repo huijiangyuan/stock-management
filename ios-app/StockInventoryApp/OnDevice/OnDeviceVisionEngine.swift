@@ -23,6 +23,7 @@ final class OnDeviceVisionEngine: ObservableObject {
 
     private let wrapper = MTMDWrapper()
     private var cancellables = Set<AnyCancellable>()
+    private var activeRecognitionID: UUID?
 
     // MARK: - 对外状态
 
@@ -110,6 +111,19 @@ final class OnDeviceVisionEngine: ObservableObject {
 
     /// 拍照识别：图片 Data → 临时 JPEG → llama.cpp 推理 → 解析 JSON。
     func recognize(imageData: Data, prompt: String = OnDeviceVisionEngine.inboundPrompt) async -> RecognitionResult {
+        guard activeRecognitionID == nil else {
+            AppLogger.shared.log(
+                level: .error,
+                category: .ai,
+                message: "MiniCPM-V 已有识别任务运行中",
+                details: "拒绝并发访问原生 llama 上下文"
+            )
+            return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true)
+        }
+        let recognitionID = UUID()
+        activeRecognitionID = recognitionID
+        defer { activeRecognitionID = nil }
+
         guard loadSuccess else {
             return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true,
                                       recognizedName: nil)
@@ -126,8 +140,21 @@ final class OnDeviceVisionEngine: ObservableObject {
         }
 
         guard let url = saveTempJPEG(imageData) else {
+            AppLogger.shared.log(level: .error, category: .ai, message: "MiniCPM-V 临时图片写入失败")
             return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true,
                                       recognizedName: nil)
+        }
+        defer {
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                AppLogger.shared.log(
+                    level: .warning,
+                    category: .ai,
+                    message: "MiniCPM-V 临时图片清理失败",
+                    details: error.localizedDescription
+                )
+            }
         }
 
         wrapper.clearKVCacheForNewTurn()
@@ -137,6 +164,12 @@ final class OnDeviceVisionEngine: ObservableObject {
             try await wrapper.startGeneration()
         } catch {
             errorMessage = error.localizedDescription
+            AppLogger.shared.log(
+                level: .error,
+                category: .ai,
+                message: "MiniCPM-V 端侧推理失败",
+                details: error.localizedDescription
+            )
             return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true, recognizedName: nil)
         }
 
