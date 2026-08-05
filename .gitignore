@@ -13,6 +13,7 @@ DerivedData/
 ios-app/Frameworks/
 deliverables/
 .workbuddy/
+.worktrees/
 
 # ── 通用 ──
 *.log
