@@ -720,12 +720,12 @@ extension NextLevel {
     }
 
     /// Stops the current recording session.
-    public func stop() {
+    public func stop(completionHandler: (@MainActor @Sendable () -> Void)? = nil) {
         // Cancel all active tasks before stopping session
         self.cancelAllTasks()
 
-        if let session = self._captureSession {
-            self.executeClosureAsyncOnSessionQueueIfNecessary {
+        self.executeClosureAsyncOnSessionQueueIfNecessary {
+            if let session = self._captureSession {
                 if session.isRunning == true {
                     session.stopRunning()
                 }
@@ -739,17 +739,19 @@ extension NextLevel {
                 self._captureSession = nil
                 self._currentDevice = nil
             }
-        }
 
-        #if USE_ARKIT
-        if self.captureMode == .arKit || self.captureMode == .arKitWithoutAudio {
-            self.executeClosureAsyncOnSessionQueueIfNecessary {
+            #if USE_ARKIT
+            if self.captureMode == .arKit || self.captureMode == .arKitWithoutAudio {
                 self.arConfiguration?.session?.pause()
                 self._arRunning = false
                 self._recordingSession = nil
             }
+            #endif
+
+            DispatchQueue.main.async {
+                completionHandler?()
+            }
         }
-        #endif
     }
 
     internal func setupAVSession() {
@@ -2685,12 +2687,19 @@ extension NextLevel {
     }
 
     /// Triggers a photo capture.
-    public func capturePhoto() {
+    @discardableResult
+    public func capturePhoto() -> Bool {
         guard let photoOutput = self._photoOutput, let _ = photoOutput.connection(with: AVMediaType.video) else {
-            return
+            Logger.photo.error("Photo capture rejected because the photo output or video connection is unavailable")
+            return false
         }
 
         if let formatDictionary = self.photoConfiguration.avcaptureDictionary() {
+            guard formatDictionary[AVVideoCodecKey] == nil ||
+                    photoOutput.availablePhotoCodecTypes.contains(self.photoConfiguration.codec) else {
+                Logger.photo.error("Photo capture rejected because codec \(self.photoConfiguration.codec.rawValue) is unavailable")
+                return false
+            }
 
             #if !( targetEnvironment(simulator) )
             if self.photoConfiguration.isRawCaptureEnabled {
@@ -2723,7 +2732,10 @@ extension NextLevel {
             }
 
             photoOutput.capturePhoto(with: photoSettings, delegate: self)
+            return true
         }
+        Logger.photo.error("Photo capture rejected because no AVFoundation settings were produced")
+        return false
     }
 
 }
@@ -3092,6 +3104,13 @@ extension NextLevel: AVCapturePhotoCaptureDelegate {
     }
 
     public func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        if let error {
+            DispatchQueue.main.async {
+                self.photoDelegate?.nextLevel(self, didFailToCapturePhoto: error, photoConfiguration: self.photoConfiguration)
+            }
+            return
+        }
+
         // output dictionary
         var photoDict: [String: Any] = [:]
 
@@ -3122,6 +3141,9 @@ extension NextLevel: AVCapturePhotoCaptureDelegate {
 
     public func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
         DispatchQueue.main.async {
+            if let error {
+                self.photoDelegate?.nextLevel(self, didFailToCapturePhoto: error, photoConfiguration: self.photoConfiguration)
+            }
             self.photoDelegate?.nextLevelDidCompletePhotoCapture(self)
         }
     }

@@ -12,6 +12,8 @@ Vendored source: NextLevel `0.19.1`.
   fallback instead of reading MainActor-isolated `UIDevice.current.orientation`.
 - Mark the camera authorization completion as `@MainActor @Sendable`, matching
   the existing main-queue delivery contract under Swift 6 strict concurrency.
+- Return an explicit start result from static photo capture, propagate native
+  capture errors, and provide a deterministic stop completion callback.
 
-These changes do not alter photo capture, preview, focus, session lifecycle, or
-image output behavior.
+These changes preserve preview, focus, and image output semantics while making
+photo capture failure and session-stop completion explicit to the application.

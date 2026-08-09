@@ -189,8 +189,13 @@ public protocol NextLevelPhotoDelegate: AnyObject {
     func nextLevel(_ nextLevel: NextLevel, output: AVCapturePhotoOutput, didCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings, photoConfiguration: NextLevelPhotoConfiguration)
 
     func nextLevel(_ nextLevel: NextLevel, didFinishProcessingPhoto photo: AVCapturePhoto, photoDict: [String: Any], photoConfiguration: NextLevelPhotoConfiguration)
+    func nextLevel(_ nextLevel: NextLevel, didFailToCapturePhoto error: any Error, photoConfiguration: NextLevelPhotoConfiguration)
 
     func nextLevelDidCompletePhotoCapture(_ nextLevel: NextLevel)
+}
+
+public extension NextLevelPhotoDelegate {
+    func nextLevel(_ nextLevel: NextLevel, didFailToCapturePhoto error: any Error, photoConfiguration: NextLevelPhotoConfiguration) {}
 }
 
 // MARK: - NextLevelDepthDataDelegate
