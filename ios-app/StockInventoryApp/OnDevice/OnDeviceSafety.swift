@@ -64,7 +64,7 @@ enum OnDeviceSafeEnvironment {
 
     static func evaluate(
         phase: OnDeviceInferencePhase,
-        availableMemory: UInt64 = os_proc_available_memory(),
+        availableMemory: UInt64 = UInt64(os_proc_available_memory()),
         physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
     ) -> OnDeviceMemoryAssessment {
         let minimum = phase == .modelLoad
