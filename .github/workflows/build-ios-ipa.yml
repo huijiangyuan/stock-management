@@ -44,6 +44,21 @@ jobs:
       - name: Install build tools
         run: brew install xcodegen cmake
 
+      - name: 生成可见构建身份
+        id: buildmeta
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA=$(git rev-parse HEAD)
+          BUILD_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %Z')
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          echo "STOCK_GIT_COMMIT=$ACTUAL_SHA" >> "$GITHUB_ENV"
+          echo "STOCK_BUILD_DATE=$BUILD_DATE" >> "$GITHUB_ENV"
+          echo "STOCK_BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
+          echo "commit=$ACTUAL_SHA" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "build_date=$BUILD_DATE" >> "$GITHUB_OUTPUT"
+          echo "构建身份: build=$BUILD_NUMBER date=$BUILD_DATE commit=$ACTUAL_SHA"
+
       - name: 计算 xcframework 缓存 key
         id: cachekey
         run: |
@@ -105,6 +120,9 @@ jobs:
             -configuration Debug \
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -parallel-testing-enabled NO \
+            CURRENT_PROJECT_VERSION="$STOCK_BUILD_NUMBER" \
+            STOCK_BUILD_DATE="$STOCK_BUILD_DATE" \
+            STOCK_GIT_COMMIT="$STOCK_GIT_COMMIT" \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Archive (no code signing)
@@ -117,13 +135,16 @@ jobs:
             -configuration Release \
             -archivePath build/StockInventoryApp.xcarchive \
             -destination "generic/platform=iOS" \
+            CURRENT_PROJECT_VERSION="$STOCK_BUILD_NUMBER" \
+            STOCK_BUILD_DATE="$STOCK_BUILD_DATE" \
+            STOCK_GIT_COMMIT="$STOCK_GIT_COMMIT" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO
           # 兜底校验：archive 必须存在，否则下方打包会失败
           test -d build/StockInventoryApp.xcarchive
 
-      - name: Assert Info.plist 含隐私权限键
+      - name: Assert Info.plist 隐私权限与构建身份
         working-directory: ios-app
         run: |
           set -euo pipefail
@@ -132,7 +153,11 @@ jobs:
             plutil -extract "$key" raw "$APP_PATH/Info.plist" > /dev/null \
               || { echo "::error::$key missing from bundle Info.plist!"; exit 1; }
           done
-          echo "Info.plist 隐私权限键校验通过"
+          test "$(plutil -extract CFBundleVersion raw "$APP_PATH/Info.plist")" = "$STOCK_BUILD_NUMBER"
+          test "$(plutil -extract StockBuildDate raw "$APP_PATH/Info.plist")" = "$STOCK_BUILD_DATE"
+          test "$(plutil -extract StockGitCommit raw "$APP_PATH/Info.plist")" = "$STOCK_GIT_COMMIT"
+          test -n "$(plutil -extract CFBundleShortVersionString raw "$APP_PATH/Info.plist")"
+          echo "Info.plist 隐私权限与构建身份校验通过"
 
       - name: Assert MobileCLIP 模型已编译进 App
         working-directory: ios-app
@@ -160,7 +185,7 @@ jobs:
           cp -R "$APP_PATH" build/Payload/
           cd build
           zip -r StockInventoryApp-unsigned.ipa Payload
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          SHORT_SHA=$(echo "$STOCK_GIT_COMMIT" | cut -c1-7)
           cp StockInventoryApp-unsigned.ipa "StockManager-${SHORT_SHA}.ipa"
           rm -rf Payload
           ls -lh *.ipa
@@ -178,11 +203,12 @@ jobs:
         if: github.ref == 'refs/heads/main'
         with:
           tag_name: latest
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ steps.buildmeta.outputs.commit }}
           name: StockManager 最新未签名构建 (公开免登录版)
           body: |
             ## 📱 最新侧载安装包自动发布
-            - **Commit**: `${{ github.sha }}`
+            - **Commit**: `${{ steps.buildmeta.outputs.commit }}`
+            - **Build**: `${{ steps.buildmeta.outputs.build_number }}` · `${{ steps.buildmeta.outputs.build_date }}`
             - **适用环境**: SideStore / TrollStore / LiveContainer 侧载免签名安装
             - **说明**: 任何人均可公开免登录点击附件直接下载 `.ipa` 文件。
           files: |
@@ -219,6 +245,16 @@ jobs:
 
       - name: Install build tools
         run: brew install xcodegen cmake
+
+      - name: 生成可见构建身份
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA=$(git rev-parse HEAD)
+          BUILD_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %Z')
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          echo "STOCK_GIT_COMMIT=$ACTUAL_SHA" >> "$GITHUB_ENV"
+          echo "STOCK_BUILD_DATE=$BUILD_DATE" >> "$GITHUB_ENV"
+          echo "STOCK_BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
 
       - name: 计算 xcframework 缓存 key
         id: cachekey
@@ -291,11 +327,14 @@ jobs:
             -configuration Release \
             -archivePath build/StockInventoryApp.xcarchive \
             -destination "generic/platform=iOS" \
+            CURRENT_PROJECT_VERSION="$STOCK_BUILD_NUMBER" \
+            STOCK_BUILD_DATE="$STOCK_BUILD_DATE" \
+            STOCK_GIT_COMMIT="$STOCK_GIT_COMMIT" \
             CODE_SIGN_STYLE=manual \
             DEVELOPMENT_TEAM="$TEAM" \
             PROVISIONING_PROFILE_SPECIFIER="$PROFILE_SPEC"
 
-      - name: Assert Info.plist 含隐私权限键
+      - name: Assert Info.plist 隐私权限与构建身份
         working-directory: ios-app
         run: |
           set -euo pipefail
@@ -304,7 +343,11 @@ jobs:
             plutil -extract "$key" raw "$APP_PATH/Info.plist" > /dev/null \
               || { echo "::error::$key missing from bundle Info.plist!"; exit 1; }
           done
-          echo "Info.plist 隐私权限键校验通过"
+          test "$(plutil -extract CFBundleVersion raw "$APP_PATH/Info.plist")" = "$STOCK_BUILD_NUMBER"
+          test "$(plutil -extract StockBuildDate raw "$APP_PATH/Info.plist")" = "$STOCK_BUILD_DATE"
+          test "$(plutil -extract StockGitCommit raw "$APP_PATH/Info.plist")" = "$STOCK_GIT_COMMIT"
+          test -n "$(plutil -extract CFBundleShortVersionString raw "$APP_PATH/Info.plist")"
+          echo "Info.plist 隐私权限与构建身份校验通过"
 
       - name: Export signed IPA
         working-directory: ios-app

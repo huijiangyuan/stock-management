@@ -9,14 +9,19 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.2.0"
-    static let build = "20260804.2329"
+    private static let info = Bundle.main.infoDictionary ?? [:]
+
+    static let version = info["CFBundleShortVersionString"] as? String ?? "0.0.0"
+    static let build = info["CFBundleVersion"] as? String ?? "0"
+    static let buildDate = info["StockBuildDate"] as? String ?? "unknown"
+    static let commit = info["StockGitCommit"] as? String ?? "local"
+    static let shortCommit = String(commit.prefix(7))
 
     static var displayString: String {
-        "v\(version) (Build \(build))"
+        "v\(version) · Build \(build) · \(buildDate) · \(shortCommit)"
     }
 
     static var fullDetailString: String {
-        "StockManager v\(version)\nBuild: \(build)\nEngine: MiniCPM-V 4.6 + Lumina + Accelerate vDSP"
+        "StockManager v\(version)\nBuild: \(build)\nDate: \(buildDate)\nCommit: \(commit)\nEngine: MobileCLIP + MiniCPM-V 4.6 + Accelerate vDSP"
     }
 }

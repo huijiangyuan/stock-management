@@ -63,6 +63,8 @@ CameraCaptureView / vendored NextLevel
 - MiniCPM-V 4.6 模型不随 IPA 打包。`ModelManager` 从 ModelScope / HuggingFace / 自定义 HTTPS 地址下载约 1.6 GB 的 GGUF + mmproj，也可从 App Documents 扫描用户手动放入的文件。
 - 官方源使用内置 SHA-256 做 fail-closed 校验；不匹配必须删除并拒绝加载，不得添加“继续使用”绕过。
 - 侧载环境当前强制 `useGPU=false` / `mmprojUseGPU=false`，并由 `OnDeviceSafeEnvironment` 做内存和运行环境准入。不得为追求速度直接恢复 Metal，除非已有 iPhone 17 / iOS 26 / LiveContainer 真机压测证据。
+- MiniCPM-V 4.6 GGUF 官方 CPU 运行口径约 2 GB、推荐设备 RAM 至少 6 GB。本项目加载前要求进程可用内存至少 2.7 GB，加载后每次图片推理前至少保留 1.5 GB；阈值变化必须有真机峰值内存证据。
+- MobileCLIP 未命中后必须先尝试 MiniCPM-V。不得增加绕过端侧 VLM 的偏好开关；模型缺失或内存准入失败时必须明确提示，之后才允许按配置进入云端兜底。
 - 原生 llama 上下文不可并发进入。`OnDeviceVisionEngine` 必须保持单任务门禁，新识别前清理 KV cache，取消要经由 wrapper 停止生成。
 - `llama.xcframework` 由 `ios-app/scripts/build_xcframework.sh` 从 `ios-app/llama.cpp-omni` 子模块生成，不入 Git。更新子模块 commit、构建脚本或 Xcode 版本后必须重建，CI 会以这三者组合生成缓存 key。
 
@@ -159,6 +161,13 @@ xcodebuild test \
 ## 7. GitHub Actions / IPA 构建
 
 工作流：`.github/workflows/build-ios-ipa.yml`，主 job 使用 `macos-15`。
+
+### 7.0 可见构建身份（强制）
+
+- 每次修改都必须保证首页和设置页可见显示：应用版本、构建号、构建日期和 Git Commit 短码。
+- 版本信息只能从 App Bundle 的 `Info.plist` 读取，禁止在 Swift 源码中写死展示值。
+- GitHub Actions 构建必须用实际 checkout commit、北京时间构建日期和 Actions run number 注入 Bundle；不得使用工作流触发事件中可能偏离 checkout 的旧 SHA。
+- CI 必须校验归档 App 的 `CFBundleShortVersionString`、`CFBundleVersion`、`StockBuildDate`、`StockGitCommit` 与本次构建一致。缺任一项应直接失败，禁止产出无法辨认版本的 IPA。
 
 ### 7.1 触发语义
 

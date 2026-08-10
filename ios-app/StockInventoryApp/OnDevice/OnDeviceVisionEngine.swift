@@ -76,27 +76,34 @@ final class OnDeviceVisionEngine: ObservableObject {
     /// 用指定 GGUF + mmproj 路径初始化端侧模型。全进程仅一次。
     func load(modelPath: String, mmprojPath: String) async {
         // 事前环境准入：不安全则绝不触碰 MTMDWrapper（C 层崩溃不可事后 catch）
-        let env = OnDeviceSafeEnvironment.evaluate()
+        let env = OnDeviceSafeEnvironment.evaluate(phase: .modelLoad)
+        AppLogger.shared.log(
+            level: env.safe ? .info : .error,
+            category: .ai,
+            message: env.safe ? "MiniCPM-V 模型加载内存检查通过" : "MiniCPM-V 模型加载内存检查未通过",
+            details: env.safe ? env.diagnosticSummary : "\(env.reason) | \(env.diagnosticSummary)"
+        )
         guard env.safe else {
             self.unavailableReason = env.reason
             self.loadSuccess = false
             errorMessage = env.reason
             return
         }
+        unavailableReason = ""
+        errorMessage = ""
         do {
-            let tier = DeviceMemoryTier.current
             let params = MTMDParams(
                 modelPath: modelPath,
                 mmprojPath: mmprojPath,
-                nCtx: 4096,
+                nCtx: 2048,
                 nThreads: 4,
                 temperature: 0.7,
-                useGPU: false,       // CPU-only：绕开 Metal 后端，侧载环境不崩
+                useGPU: false,
                 mmprojUseGPU: false,
-                warmup: true,
-                nUbatch: tier.recommendedUbatch,
-                imageMaxSliceNums: -1,
-                imageMaxTokens: tier.recommendedImageMaxTokens
+                warmup: false,
+                nUbatch: min(DeviceMemoryTier.current.recommendedUbatch, 256),
+                imageMaxSliceNums: 1,
+                imageMaxTokens: 256
             )
             try await wrapper.initialize(with: params)
             wrapper.setModelVersion(46) // MiniCPM-V 4.6
@@ -132,12 +139,21 @@ final class OnDeviceVisionEngine: ObservableObject {
         // 二次护栏：recognition 入口再确认环境安全（loadSuccess 可能来自更早的
         // 安全环境；运行期内存压力也可能使本机变为不安全）。不安全则直接兜底，
         // 绝不触碰 wrapper，避免进入 C/Metal 层触发原生崩溃。
-        let env = OnDeviceSafeEnvironment.evaluate()
+        let env = OnDeviceSafeEnvironment.evaluate(phase: .imageInference)
+        AppLogger.shared.log(
+            level: env.safe ? .info : .error,
+            category: .ai,
+            message: env.safe ? "MiniCPM-V 图片推理内存检查通过" : "MiniCPM-V 图片推理内存检查未通过",
+            details: env.safe ? env.diagnosticSummary : "\(env.reason) | \(env.diagnosticSummary)"
+        )
         guard env.safe else {
             self.unavailableReason = env.reason
+            self.errorMessage = env.reason
             return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true,
                                       recognizedName: nil)
         }
+        unavailableReason = ""
+        errorMessage = ""
 
         guard let url = saveTempJPEG(imageData) else {
             AppLogger.shared.log(level: .error, category: .ai, message: "MiniCPM-V 临时图片写入失败")
@@ -259,17 +275,17 @@ enum DeviceMemoryTier {
         switch self {
         case .tiny:  return 128
         case .small: return 256
-        case .medium: return 512
-        case .large: return 1024
+        case .medium: return 256
+        case .large: return 256
         }
     }
 
     var recommendedImageMaxTokens: Int {
         switch self {
         case .tiny:  return 256
-        case .small: return -1
-        case .medium: return -1
-        case .large: return -1
+        case .small: return 256
+        case .medium: return 256
+        case .large: return 256
         }
     }
 

@@ -26,6 +26,10 @@ targets:
         # （此前只用 info.path 导致 XcodeGen 每次 generate 把权限键抹掉，
         #  产物缺 NSCameraUsageDescription → 相机 TCC SIGABRT 闪退）
         INFOPLIST_FILE: StockInventoryApp/Info.plist
+        MARKETING_VERSION: 1.2.1
+        CURRENT_PROJECT_VERSION: 20260810.1
+        STOCK_BUILD_DATE: local-2026-08-10
+        STOCK_GIT_COMMIT: local
         # 原生 ObjC++ 桥（MBMtmd.mm）需要 C++20
         CLANG_CXX_LANGUAGE_STANDARD: gnu++20
         GCC_C_LANGUAGE_STANDARD: gnu11

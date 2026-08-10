@@ -17,18 +17,10 @@ final class VisionSettings {
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "vision_provider") }
     }
 
-    /// 仅本地 / 不上云：开启后视觉识别禁用，降级条码 / 手动（端侧向量引擎尚未实现）
+    /// 仅本地 / 不上云：开启后禁用云端，仅使用 MobileCLIP + MiniCPM-V。
     var localOnly: Bool {
         get { UserDefaults.standard.bool(forKey: "vision_local_only") }
         set { UserDefaults.standard.set(newValue, forKey: "vision_local_only") }
-    }
-
-    /// 优先端侧识别：默认 true。开启时若端侧模型可用则优先本地推理，否则回退云端 VLM；
-    /// 关闭时优先走云端 VLM（需配置 API Key），端侧作为兜底。永不阻塞用户。
-    /// 端侧引擎已强制 CPU-only 模式（绕开 Metal 后端），侧载环境安全不崩。
-    var preferOnDevice: Bool {
-        get { UserDefaults.standard.object(forKey: "vision_prefer_ondevice") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "vision_prefer_ondevice") }
     }
 
     /// 云端 VLM 是否已可用（未开 localOnly 且已配置 API Key）

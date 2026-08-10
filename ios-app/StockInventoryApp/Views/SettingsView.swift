@@ -42,8 +42,7 @@ struct SettingsView: View {
                     } label: {
                         Label("模型管理（下载 / 加载）", systemImage: "cpu")
                     }
-                    Toggle("优先端侧识别", isOn: preferOnDeviceBinding)
-                    Text("默认开启：端侧模型就绪时优先本地推理，识别数据不出设备；否则回退云端 VLM。关闭则优先云端。")
+                    Text("图片向量未命中后必须优先运行 MiniCPM-V；模型缺失或内存准入失败时会明确提示，再按配置决定是否使用云端。")
                         .font(.caption).foregroundColor(.secondary)
                 }
 
@@ -74,6 +73,8 @@ struct SettingsView: View {
                         Text(AppVersion.displayString)
                             .font(.caption)
                             .foregroundColor(.secondary)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Text("纯离线通用商品物料库存管理")
                     Text("本地 SQLite 存储 · 零后端依赖 · 需 iOS 17+。支持端侧 MiniCPM-V 4.6 本地推理与可选云端 VLM 兜底，识别数据默认不出设备。")
@@ -108,10 +109,6 @@ struct SettingsView: View {
     private var localOnlyBinding: Binding<Bool> {
         Binding(get: { VisionSettings.shared.localOnly },
                 set: { VisionSettings.shared.localOnly = $0 })
-    }
-    private var preferOnDeviceBinding: Binding<Bool> {
-        Binding(get: { VisionSettings.shared.preferOnDevice },
-                set: { VisionSettings.shared.preferOnDevice = $0 })
     }
     private var modelBinding: Binding<String> {
         Binding(get: { VisionSettings.shared.modelName ?? "" },

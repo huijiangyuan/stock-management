@@ -230,8 +230,8 @@ final class ModelManager {
         }
 
         state = .loading
-        message = "正在自动载入端侧 MiniCPM-V 模型至内存与 NPU 加速器…"
-        AppLogger.shared.log(level: .info, category: .ai, message: "开始自动加载端侧 AI 模型...")
+        message = "正在检查内存并加载端侧 MiniCPM-V 模型（CPU）…"
+        AppLogger.shared.log(level: .info, category: .ai, message: "开始检查内存并加载端侧 AI 模型")
 
         // OnDeviceVisionEngine.load 内部在后台线程做模型初始化（warmup），await 不阻塞主线程
         await OnDeviceVisionEngine.shared.load(modelPath: llm.path, mmprojPath: mp.path)
