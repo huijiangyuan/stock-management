@@ -92,14 +92,15 @@ final class OnDeviceVisionEngine: ObservableObject {
         unavailableReason = ""
         errorMessage = ""
         do {
+            let useGPU = !DeviceMemoryTier.isSimulator
             let params = MTMDParams(
                 modelPath: modelPath,
                 mmprojPath: mmprojPath,
                 nCtx: 2048,
                 nThreads: 4,
                 temperature: 0.7,
-                useGPU: false,
-                mmprojUseGPU: false,
+                useGPU: useGPU,
+                mmprojUseGPU: useGPU,
                 warmup: false,
                 nUbatch: min(DeviceMemoryTier.current.recommendedUbatch, 256),
                 imageMaxSliceNums: 1,
@@ -245,11 +246,14 @@ final class OnDeviceVisionEngine: ObservableObject {
     // MARK: - 工具
 
     private func saveTempJPEG(_ data: Data) -> URL? {
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let url = dir.appendingPathComponent("ondevice_\(Int(Date().timeIntervalSince1970))_\(Int.random(in: 1000...9999)).jpg")
-        guard (try? data.write(to: url)) != nil else { return nil }
-        return url
+        return autoreleasepool {
+            let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            let url = dir.appendingPathComponent("ondevice_\(Int(Date().timeIntervalSince1970))_\(Int.random(in: 1000...9999)).jpg")
+            guard (try? data.write(to: url)) != nil else { return nil }
+            return url
+        }
     }
+
 
     private static func parseDate(_ s: String) -> Date? {
         let fmts = ["yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd"]
