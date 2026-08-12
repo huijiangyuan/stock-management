@@ -57,10 +57,11 @@ enum OnDeviceSafeEnvironment {
     static let officialRuntimeBytes: UInt64 = 2_000_000_000
     static let recommendedDeviceMemoryBytes: UInt64 = 6_000_000_000
 
-    /// 加载阶段要容纳约 2 GB 运行占用，并给 App、图片与原生初始化留出 700 MB 安全余量。
-    static let modelLoadMinimumAvailableBytes: UInt64 = 2_700_000_000
-    /// 模型已加载后，视觉编码和生成仍需额外工作内存；不足时不进入 C++ 推理层。
-    static let inferenceMinimumAvailableBytes: UInt64 = 1_500_000_000
+    /// 模型文件以 mmap 按需映射；2 GB 是运行期占用估算，不能当成「加载前必须空闲」的内存。
+    /// 加载前只校验 App/原生初始化所需的真实安全余量。
+    static let modelLoadMinimumAvailableBytes: UInt64 = 1_100_000_000
+    /// 推理前仍需为单图视觉预处理、KV cache 与 C++ 临时缓冲保留额外余量。
+    static let inferenceMinimumAvailableBytes: UInt64 = 1_250_000_000
 
     static func evaluate(
         phase: OnDeviceInferencePhase,

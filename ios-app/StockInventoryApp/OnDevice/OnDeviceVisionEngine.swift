@@ -95,22 +95,33 @@ final class OnDeviceVisionEngine: ObservableObject {
             let params = MTMDParams(
                 modelPath: modelPath,
                 mmprojPath: mmprojPath,
-                nCtx: 2048,
+                nPredict: 64,
+                nCtx: 1536,
                 nThreads: 4,
                 temperature: 0.7,
                 useGPU: false,
                 mmprojUseGPU: false,
                 warmup: false,
-                nUbatch: min(DeviceMemoryTier.current.recommendedUbatch, 256),
-                imageMaxSliceNums: 1,
-                imageMaxTokens: 256
+                nUbatch: 128
             )
             try await wrapper.initialize(with: params)
             wrapper.setModelVersion(46) // MiniCPM-V 4.6
             self.loadSuccess = true
+            AppLogger.shared.log(
+                level: .info,
+                category: .ai,
+                message: "MiniCPM-V 模型加载完成",
+                details: "CPU, ctx=1536, batch=512, ubatch=128, output=64 tokens, vision<=448px"
+            )
         } catch {
             errorMessage = error.localizedDescription
             loadSuccess = false
+            AppLogger.shared.log(
+                level: .error,
+                category: .ai,
+                message: "MiniCPM-V 模型初始化失败",
+                details: error.localizedDescription
+            )
         }
     }
 
@@ -156,7 +167,21 @@ final class OnDeviceVisionEngine: ObservableObject {
         unavailableReason = ""
         errorMessage = ""
 
-        guard let url = saveTempJPEG(imageData) else {
+        guard let preparedImage = OnDeviceVisionImagePreprocessor.prepare(imageData) else {
+            let message = "MiniCPM-V 图片预处理失败，未进入原生推理"
+            errorMessage = message
+            AppLogger.shared.log(level: .error, category: .ai, message: message)
+            return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true,
+                                     recognizedName: nil)
+        }
+        AppLogger.shared.log(
+            level: .info,
+            category: .ai,
+            message: "MiniCPM-V 单图输入已就绪",
+            details: "input=\(imageData.count) bytes, \(preparedImage.diagnosticSummary)"
+        )
+
+        guard let url = saveTempJPEG(preparedImage.jpegData) else {
             AppLogger.shared.log(level: .error, category: .ai, message: "MiniCPM-V 临时图片写入失败")
             return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true,
                                       recognizedName: nil)
@@ -265,49 +290,4 @@ final class OnDeviceVisionEngine: ObservableObject {
         }
         return nil
     }
-}
-
-// MARK: - 机型内存档位（简化版 MBDeviceMemoryProbe，写死保守值）
-
-enum DeviceMemoryTier {
-    case tiny    // 4 GB
-    case small   // 6 GB
-    case medium  // 8 GB
-    case large   // 12+ GB
-
-    var recommendedUbatch: Int {
-        switch self {
-        case .tiny:  return 128
-        case .small: return 256
-        case .medium: return 256
-        case .large: return 256
-        }
-    }
-
-    var recommendedImageMaxTokens: Int {
-        switch self {
-        case .tiny:  return 256
-        case .small: return 256
-        case .medium: return 256
-        case .large: return 256
-        }
-    }
-
-    static let isSimulator: Bool = {
-        #if targetEnvironment(simulator)
-        return true
-        #else
-        return false
-        #endif
-    }()
-
-    static let current: DeviceMemoryTier = {
-
-        let bytes = ProcessInfo.processInfo.physicalMemory
-        let gb = Double(bytes) / 1_073_741_824.0
-        if gb < 5 { return .tiny }
-        if gb < 7 { return .small }
-        if gb < 10 { return .medium }
-        return .large
-    }()
 }

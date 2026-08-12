@@ -30,7 +30,8 @@ CameraCaptureView / vendored NextLevel
   → FeatureRepository + LocalFeatureEngine（SwiftData + vDSP 余弦相似度）
   → Top-12 候选去重为 Top-3 SKU
   → 相似度 >= 0.65：返回本地候选；>= 0.85：可高置信度选中
-  → 未命中：按 VisionSettings 选择 MiniCPM-V 4.6 / 云端 VLM
+  → 未命中：OnDeviceVisionImagePreprocessor（最长边 448、JPEG 0.72、物理单图约束）
+  → 按 VisionSettings 选择 MiniCPM-V 4.6 / 云端 VLM
   → AIRecognitionResultView（来源、置信度、Top-3、确认/建库/手选/重拍）
 ```
 
@@ -63,7 +64,9 @@ CameraCaptureView / vendored NextLevel
 - MiniCPM-V 4.6 模型不随 IPA 打包。`ModelManager` 从 ModelScope / HuggingFace / 自定义 HTTPS 地址下载约 1.6 GB 的 GGUF + mmproj，也可从 App Documents 扫描用户手动放入的文件。
 - 官方源使用内置 SHA-256 做 fail-closed 校验；不匹配必须删除并拒绝加载，不得添加“继续使用”绕过。
 - 侧载环境当前强制 `useGPU=false` / `mmprojUseGPU=false`，并由 `OnDeviceSafeEnvironment` 做内存和运行环境准入。不得为追求速度直接恢复 Metal，除非已有 iPhone 17 / iOS 26 / LiveContainer 真机压测证据。
-- MiniCPM-V 4.6 GGUF 官方 CPU 运行口径约 2 GB、推荐设备 RAM 至少 6 GB。本项目加载前要求进程可用内存至少 2.7 GB，加载后每次图片推理前至少保留 1.5 GB；阈值变化必须有真机峰值内存证据。
+- MiniCPM-V 4.6 GGUF 官方 CPU 运行口径约 2 GB、推荐设备 RAM 至少 6 GB。模型文件以 mmap 按需映射，2 GB 不是“加载前必须空闲”的门槛；本项目要求物理内存至少 6 GB、加载前进程可用内存至少 1.1 GB、图片推理前至少保留 1.25 GB。每个阶段均必须重新检查并记录诊断；阈值变化必须有真机峰值内存证据。
+- upstream mtmd 的 MiniCPM-V 切图上限目前在内部固定为最多 9 片，公开 C API 不能可靠覆盖。必须由 `OnDeviceVisionImagePreprocessor` 在进入 bridge 前把图片物理缩至最长边 448，保证触发单图路径；不得重新引入无效的 `imageMaxSliceNums` / `imageMaxTokens` 伪开关。
+- 端侧库存档固定 `n_ctx=1536`、`n_batch=512`、`n_ubatch=128`、最大输出 64 token。它面向单图 JSON 识别，任何改大都必须同时给出真机峰值内存、识别质量和 LiveContainer 连续拍照证据。
 - MobileCLIP 未命中后必须先尝试 MiniCPM-V。不得增加绕过端侧 VLM 的偏好开关；模型缺失或内存准入失败时必须明确提示，之后才允许按配置进入云端兜底。
 - 原生 llama 上下文不可并发进入。`OnDeviceVisionEngine` 必须保持单任务门禁，新识别前清理 KV cache，取消要经由 wrapper 停止生成。
 - `llama.xcframework` 由 `ios-app/scripts/build_xcframework.sh` 从 `ios-app/llama.cpp-omni` 子模块生成，不入 Git。更新子模块 commit、构建脚本或 Xcode 版本后必须重建，CI 会以这三者组合生成缓存 key。

@@ -28,7 +28,7 @@ struct ModelAutoLoadingBannerView: View {
                                 .font(.subheadline)
                                 .fontWeight(.bold)
                         }
-                        Text(modelMgr.message.isEmpty ? "正在初始化 MiniCPM-V 4.6 内存模型与 NPU 加速..." : modelMgr.message)
+                        Text(modelMgr.message.isEmpty ? "正在初始化 MiniCPM-V 4.6 CPU 端侧模型..." : modelMgr.message)
                             .font(.caption2)
                             .opacity(0.9)
                             .lineLimit(1)

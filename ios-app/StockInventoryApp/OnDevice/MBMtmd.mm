@@ -187,20 +187,19 @@ mb_mtmd_params mb_mtmd_params_default(void) {
     p.use_gpu               = true;
     p.mmproj_use_gpu        = true;
     p.warmup                = true;
-    p.image_max_tokens      = -1;
-    p.image_max_slice_nums  = -1;
     return p;
 }
 
 // Default n_ubatch when the caller did not specify one (mb_mtmd_params.n_ubatch == 0).
 //
-// 512 is a "safe everywhere" middle ground — on a measurement run with
-// MiniCPM-V 4.6 Q4_K_M it spends ~487 MiB of MTL0 compute buffer, fitting
-// comfortably under the ~1.5 GB application memory limit on a 4 GB iPhone.
-// For tighter or looser devices the iOS layer overrides this via
-// MBDeviceMemoryProbe; the bridge default is only used when no caller is
-// driving the value (e.g. the macOS bridge_test CLI without env override).
-static constexpr int MB_DEFAULT_N_UBATCH = 512;
+// 128 is the mobile-safe default. `n_ubatch` controls the physical working
+// buffer on every backend; callers with measured headroom can opt into a
+// larger value, but an omitted value must not recreate the legacy 2048 peak.
+static constexpr int MB_DEFAULT_N_UBATCH = 128;
+// The app submits only a single 448px inventory image plus a short JSON prompt.
+// A 512-token logical batch is sufficient and avoids reserving an unnecessary
+// 2048-token prefill buffer. mtmd helper functions chunk longer input safely.
+static constexpr int MB_MOBILE_N_BATCH = 512;
 
 mb_mtmd_context * mb_mtmd_init(const char * model_path,
                                const char * mmproj_path,
@@ -248,9 +247,8 @@ mb_mtmd_context * mb_mtmd_init(const char * model_path,
     //     near-pure memory win.  Caller picks per-device — see
     //     MBDeviceMemoryProbe.swift on iOS — so the bridge stays portable.
     //
-    //   * `n_batch` (logical max single submission) stays at 2048; llama
-    //     internally chunks batches into n_ubatch-sized physical pieces, so
-    //     a large logical batch is "more dispatches", not a memory hit.
+    //   * `n_batch` is capped at 512 for the single-image inventory path.
+    //     mtmd helper functions split longer prefill into n_batch-sized calls.
     //
     //   * `flash_attn_type=AUTO` lets the backend pick; on Metal this turns
     //     into ENABLED for f16 KV, which avoids materialising the (n_ctx ×
@@ -264,7 +262,7 @@ mb_mtmd_context * mb_mtmd_init(const char * model_path,
 
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx           = static_cast<uint32_t>(params.n_ctx > 0 ? params.n_ctx : 4096);
-    cparams.n_batch         = 2048;
+    cparams.n_batch         = MB_MOBILE_N_BATCH;
     cparams.n_ubatch        = static_cast<uint32_t>(requested_ubatch);
     cparams.n_threads       = params.n_threads;
     cparams.n_threads_batch = params.n_threads;
@@ -320,10 +318,9 @@ mb_mtmd_context * mb_mtmd_init(const char * model_path,
         vparams.use_gpu              = params.mmproj_use_gpu;
         vparams.print_timings        = false;
         vparams.n_threads            = params.n_threads;
-        // warmup / image_max_tokens / image_max_slice_nums removed from
-        // upstream mtmd_context_params; defaults are fine for mobile.
-        // image_min_tokens / flash_attn_type / cb_eval are intentionally left
-        // at their defaults; the demo never tuned them.
+        // mtmd does not expose a reliable public MiniCPM-V slice cap. The app
+        // enforces its 448px single-image contract before reaching this bridge.
+        // image_min_tokens / flash_attn_type / cb_eval stay at upstream defaults.
 
         ctx->vision.reset(mtmd_init_from_file(mmproj_path, ctx->model.get(), vparams));
         if (!ctx->vision) {
@@ -366,7 +363,7 @@ mb_mtmd_context * mb_mtmd_init_text_only(const char * model_path,
 
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx           = static_cast<uint32_t>(params.n_ctx > 0 ? params.n_ctx : 4096);
-    cparams.n_batch         = 2048;
+    cparams.n_batch         = MB_MOBILE_N_BATCH;
     cparams.n_ubatch        = static_cast<uint32_t>(requested_ubatch);
     cparams.n_threads       = params.n_threads;
     cparams.n_threads_batch = params.n_threads;
@@ -437,14 +434,6 @@ bool mb_mtmd_clean_kv_cache(mb_mtmd_context * ctx) {
 
 void mb_mtmd_set_model_version(mb_mtmd_context * ctx, int version) {
     if (ctx) ctx->model_version = version;
-}
-
-void mb_mtmd_set_image_max_slice_nums(mb_mtmd_context * ctx, int n) {
-    // Upstream mtmd no longer exposes per-image slice control;
-    // slicing logic lives inside clip.cpp and auto-calculates from
-    // image dimensions.  Keep the bridge entry-point as a no-op so
-    // existing callers don't break.
-    (void)ctx; (void)n;
 }
 
 // ---------------------------------------------------------------------------

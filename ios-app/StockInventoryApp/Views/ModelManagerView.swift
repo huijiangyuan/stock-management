@@ -126,7 +126,7 @@ struct ModelManagerView: View {
                         Text(memoryAssessment.safe
                              ? "内存检查通过，可以运行 MiniCPM-V 4.6。"
                              : memoryAssessment.reason)
-                        Text("官方 GGUF CPU 运行约占 2 GB，推荐设备 RAM ≥ 6 GB。本 App 加载前要求当前进程至少可用 2.7 GB；模型加载后，每次图片推理前至少保留 1.5 GB。")
+                        Text("官方 GGUF CPU 运行约占 2 GB，推荐设备 RAM ≥ 6 GB。模型以按需映射加载：本 App 加载前要求保留 1.1 GB，图片推理前保留 1.25 GB；每张 VLM 图片会先压成不超过 448 px 的单图输入。")
                             .foregroundColor(.secondary)
                         Text(memoryAssessment.diagnosticSummary)
                             .font(.caption2.monospaced())

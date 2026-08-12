@@ -5,7 +5,7 @@ final class OnDeviceSafetyTests: XCTestCase {
     func testModelLoadRejectsInsufficientAvailableMemory() {
         let result = OnDeviceSafeEnvironment.evaluate(
             phase: .modelLoad,
-            availableMemory: 2_699_999_999,
+            availableMemory: OnDeviceSafeEnvironment.modelLoadMinimumAvailableBytes - 1,
             physicalMemory: 8_000_000_000
         )
 
@@ -33,13 +33,13 @@ final class OnDeviceSafetyTests: XCTestCase {
         )
 
         XCTAssertTrue(result.safe)
-        XCTAssertEqual(result.minimumAvailableBytes, 1_500_000_000)
+        XCTAssertEqual(result.minimumAvailableBytes, 1_250_000_000)
     }
 
     func testRejectsDeviceBelowOfficialRecommendation() {
         let result = OnDeviceSafeEnvironment.evaluate(
             phase: .modelLoad,
-            availableMemory: 3_000_000_000,
+            availableMemory: OnDeviceSafeEnvironment.modelLoadMinimumAvailableBytes,
             physicalMemory: 5_000_000_000
         )
 
