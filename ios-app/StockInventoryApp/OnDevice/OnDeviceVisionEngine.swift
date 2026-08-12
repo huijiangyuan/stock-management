@@ -76,36 +76,55 @@ final class OnDeviceVisionEngine: ObservableObject {
     /// 用指定 GGUF + mmproj 路径初始化端侧模型。全进程仅一次。
     func load(modelPath: String, mmprojPath: String) async {
         // 事前环境准入：不安全则绝不触碰 MTMDWrapper（C 层崩溃不可事后 catch）
-        let env = OnDeviceSafeEnvironment.evaluate()
+        let env = OnDeviceSafeEnvironment.evaluate(phase: .modelLoad)
+        AppLogger.shared.log(
+            level: env.safe ? .info : .error,
+            category: .ai,
+            message: env.safe ? "MiniCPM-V 模型加载内存检查通过" : "MiniCPM-V 模型加载内存检查未通过",
+            details: env.safe ? env.diagnosticSummary : "\(env.reason) | \(env.diagnosticSummary)"
+        )
         guard env.safe else {
             self.unavailableReason = env.reason
             self.loadSuccess = false
             errorMessage = env.reason
             return
         }
+        unavailableReason = ""
+        errorMessage = ""
         do {
-            let tier = DeviceMemoryTier.current
             let params = MTMDParams(
                 modelPath: modelPath,
                 mmprojPath: mmprojPath,
-                nCtx: 4096,
+                nPredict: 64,
+                nCtx: 1536,
                 nThreads: 4,
                 temperature: 0.7,
-                useGPU: false,       // CPU-only：绕开 Metal 后端，侧载环境不崩
+                useGPU: false,
                 mmprojUseGPU: false,
-                warmup: true,
-                nUbatch: tier.recommendedUbatch,
-                imageMaxSliceNums: -1,
-                imageMaxTokens: tier.recommendedImageMaxTokens
+                warmup: false,
+                nUbatch: 128
             )
             try await wrapper.initialize(with: params)
             wrapper.setModelVersion(46) // MiniCPM-V 4.6
             self.loadSuccess = true
+            AppLogger.shared.log(
+                level: .info,
+                category: .ai,
+                message: "MiniCPM-V 模型加载完成",
+                details: "CPU, ctx=1536, batch=512, ubatch=128, output=64 tokens, vision<=448px"
+            )
         } catch {
             errorMessage = error.localizedDescription
             loadSuccess = false
+            AppLogger.shared.log(
+                level: .error,
+                category: .ai,
+                message: "MiniCPM-V 模型初始化失败",
+                details: error.localizedDescription
+            )
         }
     }
+
 
     // MARK: - 识别
 
@@ -132,14 +151,37 @@ final class OnDeviceVisionEngine: ObservableObject {
         // 二次护栏：recognition 入口再确认环境安全（loadSuccess 可能来自更早的
         // 安全环境；运行期内存压力也可能使本机变为不安全）。不安全则直接兜底，
         // 绝不触碰 wrapper，避免进入 C/Metal 层触发原生崩溃。
-        let env = OnDeviceSafeEnvironment.evaluate()
+        let env = OnDeviceSafeEnvironment.evaluate(phase: .imageInference)
+        AppLogger.shared.log(
+            level: env.safe ? .info : .error,
+            category: .ai,
+            message: env.safe ? "MiniCPM-V 图片推理内存检查通过" : "MiniCPM-V 图片推理内存检查未通过",
+            details: env.safe ? env.diagnosticSummary : "\(env.reason) | \(env.diagnosticSummary)"
+        )
         guard env.safe else {
             self.unavailableReason = env.reason
+            self.errorMessage = env.reason
             return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true,
                                       recognizedName: nil)
         }
+        unavailableReason = ""
+        errorMessage = ""
 
-        guard let url = saveTempJPEG(imageData) else {
+        guard let preparedImage = OnDeviceVisionImagePreprocessor.prepare(imageData) else {
+            let message = "MiniCPM-V 图片预处理失败，未进入原生推理"
+            errorMessage = message
+            AppLogger.shared.log(level: .error, category: .ai, message: message)
+            return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true,
+                                     recognizedName: nil)
+        }
+        AppLogger.shared.log(
+            level: .info,
+            category: .ai,
+            message: "MiniCPM-V 单图输入已就绪",
+            details: "input=\(imageData.count) bytes, \(preparedImage.diagnosticSummary)"
+        )
+
+        guard let url = saveTempJPEG(preparedImage.jpegData) else {
             AppLogger.shared.log(level: .error, category: .ai, message: "MiniCPM-V 临时图片写入失败")
             return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true,
                                       recognizedName: nil)
@@ -229,11 +271,14 @@ final class OnDeviceVisionEngine: ObservableObject {
     // MARK: - 工具
 
     private func saveTempJPEG(_ data: Data) -> URL? {
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let url = dir.appendingPathComponent("ondevice_\(Int(Date().timeIntervalSince1970))_\(Int.random(in: 1000...9999)).jpg")
-        guard (try? data.write(to: url)) != nil else { return nil }
-        return url
+        return autoreleasepool {
+            let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            let url = dir.appendingPathComponent("ondevice_\(Int(Date().timeIntervalSince1970))_\(Int.random(in: 1000...9999)).jpg")
+            guard (try? data.write(to: url)) != nil else { return nil }
+            return url
+        }
     }
+
 
     private static func parseDate(_ s: String) -> Date? {
         let fmts = ["yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd"]
@@ -245,40 +290,4 @@ final class OnDeviceVisionEngine: ObservableObject {
         }
         return nil
     }
-}
-
-// MARK: - 机型内存档位（简化版 MBDeviceMemoryProbe，写死保守值）
-
-enum DeviceMemoryTier {
-    case tiny    // 4 GB
-    case small   // 6 GB
-    case medium  // 8 GB
-    case large   // 12+ GB
-
-    var recommendedUbatch: Int {
-        switch self {
-        case .tiny:  return 128
-        case .small: return 256
-        case .medium: return 512
-        case .large: return 1024
-        }
-    }
-
-    var recommendedImageMaxTokens: Int {
-        switch self {
-        case .tiny:  return 256
-        case .small: return -1
-        case .medium: return -1
-        case .large: return -1
-        }
-    }
-
-    static let current: DeviceMemoryTier = {
-        let bytes = ProcessInfo.processInfo.physicalMemory
-        let gb = Double(bytes) / 1_073_741_824.0
-        if gb < 5 { return .tiny }
-        if gb < 7 { return .small }
-        if gb < 10 { return .medium }
-        return .large
-    }()
 }

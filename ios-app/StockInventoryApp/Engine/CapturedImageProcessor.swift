@@ -42,30 +42,32 @@ actor CapturedImageProcessor: CapturedImageProcessing {
     }
 
     func process(_ imageData: Data) throws -> ProcessedCapturedImage {
-        guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
-              CGImageSourceGetCount(source) > 0 else {
-            throw ProcessingError.invalidImageData
-        }
+        try autoreleasepool {
+            guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+                  CGImageSourceGetCount(source) > 0 else {
+                throw ProcessingError.invalidImageData
+            }
 
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize
-        ]
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-            throw ProcessingError.thumbnailCreationFailed
-        }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize
+            ]
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+                throw ProcessingError.thumbnailCreationFailed
+            }
 
-        let image = UIImage(cgImage: cgImage)
-        guard let jpegData = image.jpegData(compressionQuality: compressionQuality) else {
-            throw ProcessingError.jpegEncodingFailed
-        }
+            let image = UIImage(cgImage: cgImage)
+            guard let jpegData = image.jpegData(compressionQuality: compressionQuality) else {
+                throw ProcessingError.jpegEncodingFailed
+            }
 
-        return ProcessedCapturedImage(
-            jpegData: jpegData,
-            pixelWidth: cgImage.width,
-            pixelHeight: cgImage.height
-        )
+            return ProcessedCapturedImage(
+                jpegData: jpegData,
+                pixelWidth: cgImage.width,
+                pixelHeight: cgImage.height
+            )
+        }
     }
 }

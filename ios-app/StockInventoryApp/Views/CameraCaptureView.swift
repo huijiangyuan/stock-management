@@ -3,7 +3,7 @@ import AVFoundation
 import SwiftUI
 import UIKit
 
-/// NextLevel 静态拍照入口。图片回调发生前会先停止相机会话，降低随后模型推理的内存峰值。
+/// NextLevel 静态拍照入口。完整拍照事务结束后停止相机会话，降低随后模型推理的内存峰值。
 struct CameraCaptureView: View {
     let onCaptured: (Data) -> Void
 
@@ -55,8 +55,11 @@ private final class NextLevelCameraViewController: UIViewController {
     private let statusLabel = UILabel()
     private var state: State = .idle
     private var pendingPhotoData: Data?
+    private var pendingCaptureFailure: String?
     private var shouldCancelAfterStop = false
     private var shouldRestartAfterStop = false
+    private var captureWatchdog: Task<Void, Never>?
+    private var stopWatchdog: Task<Void, Never>?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -72,6 +75,7 @@ private final class NextLevelCameraViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        cancelWatchdogs()
         if state != .finished {
             camera.stop()
             releaseDelegates()
@@ -123,7 +127,9 @@ private final class NextLevelCameraViewController: UIViewController {
                 shouldRestartAfterStop = true
                 state = .stopping
                 statusLabel.text = "正在重置相机会话…"
-                camera.stop()
+                camera.stop { [weak self] in
+                    self?.restartAfterStopIfNeeded()
+                }
             }
         } catch {
             state = .idle
@@ -144,7 +150,19 @@ private final class NextLevelCameraViewController: UIViewController {
         state = .capturing
         captureButton.isEnabled = false
         statusLabel.text = "正在拍照…"
-        camera.capturePhoto()
+        guard camera.capturePhoto() else {
+            state = .running
+            captureButton.isEnabled = true
+            statusLabel.text = "相机输出未就绪，请重试"
+            AppLogger.shared.log(
+                level: .error,
+                category: .camera,
+                message: "无法启动静态拍照",
+                details: "NextLevel 没有可用的照片输出、视频连接或编码器"
+            )
+            return
+        }
+        armCaptureWatchdog()
     }
 
     @objc private func cancel() {
@@ -163,18 +181,20 @@ private final class NextLevelCameraViewController: UIViewController {
 
     private func stopSessionAndComplete() {
         guard state != .finished else { return }
-        let wasRunning = camera.isRunning
+        captureWatchdog?.cancel()
+        captureWatchdog = nil
         state = .stopping
         statusLabel.text = "正在释放相机资源…"
-        camera.stop()
-        if !wasRunning {
-            complete()
+        armStopWatchdog()
+        camera.stop { [weak self] in
+            self?.complete()
         }
     }
 
     private func complete() {
         guard state != .finished else { return }
         state = .finished
+        cancelWatchdogs()
         releaseDelegates()
 
         if let data = pendingPhotoData {
@@ -185,9 +205,68 @@ private final class NextLevelCameraViewController: UIViewController {
                 details: "原图数据 \(data.count / 1_024) KB"
             )
             onCaptured?(data)
+        } else if pendingCaptureFailure != nil {
+            onCancel?()
         } else if shouldCancelAfterStop {
             onCancel?()
         }
+    }
+
+    private func restartAfterStopIfNeeded() {
+        guard shouldRestartAfterStop, state == .stopping else { return }
+        shouldRestartAfterStop = false
+        state = .idle
+        startCamera()
+    }
+
+    private func armCaptureWatchdog() {
+        captureWatchdog?.cancel()
+        captureWatchdog = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 10_000_000_000)
+            } catch {
+                return
+            }
+            guard let self, self.state == .capturing else { return }
+            self.recordCaptureFailure(
+                message: "拍照回调超时",
+                details: "10 秒内未收到 AVCapturePhotoCaptureDelegate 完成回调"
+            )
+            self.stopSessionAndComplete()
+        }
+    }
+
+    private func armStopWatchdog() {
+        stopWatchdog?.cancel()
+        stopWatchdog = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+            } catch {
+                return
+            }
+            guard let self, self.state == .stopping else { return }
+            AppLogger.shared.log(
+                level: .error,
+                category: .camera,
+                message: "相机会话停止超时",
+                details: "5 秒内未收到 NextLevel 停止完成回调，已强制结束拍照页面"
+            )
+            self.complete()
+        }
+    }
+
+    private func recordCaptureFailure(message: String, details: String?) {
+        guard pendingCaptureFailure == nil else { return }
+        pendingCaptureFailure = details ?? message
+        statusLabel.text = "拍照失败，正在释放资源…"
+        AppLogger.shared.log(level: .error, category: .camera, message: message, details: details)
+    }
+
+    private func cancelWatchdogs() {
+        captureWatchdog?.cancel()
+        captureWatchdog = nil
+        stopWatchdog?.cancel()
+        stopWatchdog = nil
     }
 
     private func releaseDelegates() {
@@ -280,9 +359,7 @@ extension NextLevelCameraViewController: NextLevelDelegate {
 
     func nextLevelSessionDidStop(_ nextLevel: NextLevel) {
         if shouldRestartAfterStop {
-            shouldRestartAfterStop = false
-            state = .idle
-            startCamera()
+            restartAfterStopIfNeeded()
             return
         }
         if state == .stopping {
@@ -337,15 +414,36 @@ extension NextLevelCameraViewController: NextLevelPhotoDelegate {
     ) {
         guard state == .capturing else { return }
         guard let data = photoDict[NextLevelPhotoFileDataKey] as? Data else {
-            state = .running
-            captureButton.isEnabled = true
-            statusLabel.text = "拍照失败，请重试"
-            AppLogger.shared.log(level: .error, category: .camera, message: "NextLevel 未返回有效照片数据")
+            recordCaptureFailure(message: "NextLevel 未返回有效照片数据", details: nil)
             return
         }
         pendingPhotoData = data
-        stopSessionAndComplete()
+        statusLabel.text = "正在完成拍照…"
+        AppLogger.shared.log(
+            level: .info,
+            category: .camera,
+            message: "NextLevel 已生成照片数据",
+            details: "等待 AVCapturePhotoCaptureDelegate 完成事务，原图数据 \(data.count / 1_024) KB"
+        )
     }
 
-    func nextLevelDidCompletePhotoCapture(_ nextLevel: NextLevel) {}
+    func nextLevel(
+        _ nextLevel: NextLevel,
+        didFailToCapturePhoto error: any Error,
+        photoConfiguration: NextLevelPhotoConfiguration
+    ) {
+        guard state == .capturing else { return }
+        recordCaptureFailure(message: "原生拍照失败", details: error.localizedDescription)
+    }
+
+    func nextLevelDidCompletePhotoCapture(_ nextLevel: NextLevel) {
+        guard state == .capturing else { return }
+        captureWatchdog?.cancel()
+        captureWatchdog = nil
+        if pendingPhotoData == nil, pendingCaptureFailure == nil {
+            recordCaptureFailure(message: "拍照完成但没有生成图片", details: nil)
+        }
+        AppLogger.shared.log(level: .info, category: .camera, message: "NextLevel 拍照事务已完成，开始释放相机会话")
+        stopSessionAndComplete()
+    }
 }

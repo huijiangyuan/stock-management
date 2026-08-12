@@ -65,6 +65,8 @@ struct DashboardView: View {
                     Text("StockManager \(AppVersion.displayString)")
                         .font(.caption2)
                         .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 8)
                 }

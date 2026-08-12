@@ -161,34 +161,20 @@ final class VisionRecognitionPipeline {
     ) async -> (RecognitionResult, VisionRecognitionSource) {
         let settings = VisionSettings.shared
 
-        if (settings.preferOnDevice || !settings.cloudReady),
-           !OnDeviceVisionEngine.shared.loadSuccess {
+        // MobileCLIP 未命中后必须先尝试 MiniCPM-V；云端只在模型缺失或
+        // 内存准入未通过时兜底，不能通过偏好设置绕过端侧验证链路。
+        if !OnDeviceVisionEngine.shared.loadSuccess {
             await ModelManager.shared.ensureLoaded()
         }
-        let onDeviceReady = OnDeviceVisionEngine.shared.onDeviceUsable
-
-        if settings.preferOnDevice {
-            if onDeviceReady {
-                return (await OnDeviceVisionEngine.shared.recognize(imageData: imageData), .miniCPM)
-            }
-            if settings.cloudReady {
-                let result = await CloudVisionEngine().recognize(
-                    RecognitionInput(visionImage: imageData),
-                    context: context
-                )
-                return (result, .cloud)
-            }
-        } else {
-            if settings.cloudReady {
-                let result = await CloudVisionEngine().recognize(
-                    RecognitionInput(visionImage: imageData),
-                    context: context
-                )
-                return (result, .cloud)
-            }
-            if onDeviceReady {
-                return (await OnDeviceVisionEngine.shared.recognize(imageData: imageData), .miniCPM)
-            }
+        if OnDeviceVisionEngine.shared.onDeviceUsable {
+            return (await OnDeviceVisionEngine.shared.recognize(imageData: imageData), .miniCPM)
+        }
+        if settings.cloudReady {
+            let result = await CloudVisionEngine().recognize(
+                RecognitionInput(visionImage: imageData),
+                context: context
+            )
+            return (result, .cloud)
         }
 
         AppLogger.shared.log(

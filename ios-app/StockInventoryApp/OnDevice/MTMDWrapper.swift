@@ -309,24 +309,6 @@ public class MTMDWrapper: ObservableObject {
         print("MTMDWrapper: 生成已停止")
     }
     
-    /// 运行时调整单张图最大切片数（无需 reload mmproj）。
-    ///
-    /// clip 在每张图编码时都会重新读取 hparams.custom_image_max_slice_nums，
-    /// 所以这里只是把新值写入上下文，下一张图自然就用新档位生效。
-    /// 链路：mb_mtmd_set_image_max_slice_nums → mtmd_set_image_max_slice_nums →
-    /// clip_set_image_max_slice_nums → 写入 clip_hparams。
-    /// - Parameter n: 1 表示不切图（最快），9 表示 MiniCPM-V 模型上限（最清晰）。
-    ///                传 -1 等价于"按模型默认"。
-    public func setImageMaxSliceNums(_ n: Int) {
-        guard let ctx = context else {
-            // 还没 init 完，下一次 initialize() 会通过 MTMDParams 把值带进去。
-            print("MTMDWrapper: setImageMaxSliceNums 调用时上下文未就绪，nop")
-            return
-        }
-        mb_mtmd_set_image_max_slice_nums(ctx, Int32(n))
-        print("MTMDWrapper: setImageMaxSliceNums(\(n)) 已调用，下一张图编码时生效")
-    }
-
     /// Set the model version so the C bridge can pick the correct prompt template.
     /// - Parameter version: 26=V2.6, 40=V4.0, 46=V4.6, 5=MiniCPM5
     public func setModelVersion(_ version: Int) {
@@ -415,6 +397,8 @@ public class MTMDWrapper: ObservableObject {
         // Mirrors Android's cached_token_chars = "<think>\n" logic.
         var accumulated: String = isTextOnlyModel ? "<think>\n" : ""
         fullOutput = accumulated
+        let predictionLimit = max(params?.nPredict ?? 64, 1)
+        var generatedTokenCount = 0
 
         // 50ms = 20 fps 节流。再短主线程会被打扰太多次（每帧 sink → markdown
         // 高度计算 → scroll），再长用户能看出"一卡一卡"出字（不流畅）。
@@ -441,6 +425,9 @@ public class MTMDWrapper: ObservableObject {
                 tokenString = ""
             }
             accumulated += tokenString
+            if !cToken.is_end {
+                generatedTokenCount += 1
+            }
 
             // 释放 native bridge 在 mb_mtmd_loop 里 malloc 出来的 token 字符串。
             // 这个 free 是必须的；旧 mtmd-ios 时代被注释掉是因为当时漏 free，
@@ -451,7 +438,9 @@ public class MTMDWrapper: ObservableObject {
 
             // 节流：把高频 token 累加合并成 ≤20 fps 的 fullOutput 广播。
             let now = Date()
+            let reachedPredictionLimit = generatedTokenCount >= predictionLimit
             let shouldFlush = cToken.is_end
+                || reachedPredictionLimit
                 || now.timeIntervalSince(lastFlush) >= flushIntervalMs
             if shouldFlush {
                 fullOutput = accumulated
@@ -459,9 +448,13 @@ public class MTMDWrapper: ObservableObject {
             }
 
             // 检查是否生成完成
-            if cToken.is_end {
+            if cToken.is_end || reachedPredictionLimit {
                 updateGenerationState(.completed)
-                print("MTMDWrapper: 生成完成: \(fullOutput)")
+                if reachedPredictionLimit && !cToken.is_end {
+                    print("MTMDWrapper: 达到输出上限 \(predictionLimit) token，结束生成")
+                } else {
+                    print("MTMDWrapper: 生成完成: \(fullOutput)")
+                }
                 // 清理任务引用但不重置状态，让状态保持为 completed
                 // 注意：不在这里清 KV cache，否则多轮上下文会丢。
                 // KV 的清理统一交给显式 reset()（切换模型 / 新对话入口）

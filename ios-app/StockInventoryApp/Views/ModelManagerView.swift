@@ -12,15 +12,10 @@ struct ModelManagerView: View {
     @State private var showCustomRisk = false
     @State private var pendingCustom = false
 
-    private var ramNote: (text: String, danger: Bool) {
-        switch DeviceMemoryTier.current {
-        case .tiny:
-            return ("推荐 ≥6 GB；当前设备内存约 < 5 GB，端侧推理可能失败或闪退，仍可尝试，但建议改用云端 VLM 兜底。", true)
-        case .small:
-            return ("推荐 ≥6 GB；当前设备内存约 6 GB，端侧推理可能偏慢/偶发卡顿，属正常降级范围，可尝试。", false)
-        default:
-            return ("设备内存充足，可流畅运行端侧 MiniCPM-V 4.6 推理。", false)
-        }
+    private var memoryAssessment: OnDeviceMemoryAssessment {
+        OnDeviceSafeEnvironment.evaluate(
+            phase: mgr.loaded ? .imageInference : .modelLoad
+        )
     }
 
     var body: some View {
@@ -31,6 +26,12 @@ struct ModelManagerView: View {
                     Spacer()
                     Text(mgr.modelPresent ? "已存在" : "缺失")
                         .foregroundColor(mgr.modelPresent ? .brand : .danger)
+                }
+                HStack {
+                    Text("MiniCPM-V 内存准入")
+                    Spacer()
+                    Text(memoryAssessment.safe ? "通过" : "不足")
+                        .foregroundColor(memoryAssessment.safe ? .brand : .danger)
                 }
                 HStack {
                     Text("推理引擎")
@@ -119,9 +120,20 @@ struct ModelManagerView: View {
 
             Section {
                 HStack(alignment: .top) {
-                    Image(systemName: ramNote.danger ? "exclamationmark.triangle.fill" : "info.circle.fill")
-                        .foregroundColor(ramNote.danger ? .danger : .warning)
-                    Text(ramNote.text).font(.caption)
+                    Image(systemName: memoryAssessment.safe ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundColor(memoryAssessment.safe ? .brand : .danger)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(memoryAssessment.safe
+                             ? "内存检查通过，可以运行 MiniCPM-V 4.6。"
+                             : memoryAssessment.reason)
+                        Text("官方 GGUF CPU 运行约占 2 GB，推荐设备 RAM ≥ 6 GB。模型以按需映射加载：本 App 加载前要求保留 1.1 GB，图片推理前保留 1.25 GB；每张 VLM 图片会先压成不超过 448 px 的单图输入。")
+                            .foregroundColor(.secondary)
+                        Text(memoryAssessment.diagnosticSummary)
+                            .font(.caption2.monospaced())
+                            .foregroundColor(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    .font(.caption)
                 }
             } header: { Label("设备能力", systemImage: "memorychip") }
         }
