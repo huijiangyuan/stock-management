@@ -92,15 +92,14 @@ final class OnDeviceVisionEngine: ObservableObject {
         unavailableReason = ""
         errorMessage = ""
         do {
-            let useGPU = !DeviceMemoryTier.isSimulator
             let params = MTMDParams(
                 modelPath: modelPath,
                 mmprojPath: mmprojPath,
                 nCtx: 2048,
                 nThreads: 4,
                 temperature: 0.7,
-                useGPU: useGPU,
-                mmprojUseGPU: useGPU,
+                useGPU: false,
+                mmprojUseGPU: false,
                 warmup: false,
                 nUbatch: min(DeviceMemoryTier.current.recommendedUbatch, 256),
                 imageMaxSliceNums: 1,
@@ -114,6 +113,7 @@ final class OnDeviceVisionEngine: ObservableObject {
             loadSuccess = false
         }
     }
+
 
     // MARK: - 识别
 
@@ -293,7 +293,16 @@ enum DeviceMemoryTier {
         }
     }
 
+    static let isSimulator: Bool = {
+        #if targetEnvironment(simulator)
+        return true
+        #else
+        return false
+        #endif
+    }()
+
     static let current: DeviceMemoryTier = {
+
         let bytes = ProcessInfo.processInfo.physicalMemory
         let gb = Double(bytes) / 1_073_741_824.0
         if gb < 5 { return .tiny }
