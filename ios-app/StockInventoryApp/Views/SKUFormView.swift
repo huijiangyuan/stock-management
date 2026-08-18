@@ -302,7 +302,7 @@ struct SKUFormView: View {
 
         let outcome: VisionRecognitionOutcome
         do {
-            outcome = try await VisionRecognitionPipeline(context: ctx).recognize(rawImageData: data)
+            outcome = try await VisionRecognitionPipeline(context: ctx).extractAttributesForNewSKU(rawImageData: data)
             capturedOutcome = outcome
         } catch is CancellationError {
             AppLogger.shared.log(level: .info, category: .ai, message: "商品图片识别已取消")
