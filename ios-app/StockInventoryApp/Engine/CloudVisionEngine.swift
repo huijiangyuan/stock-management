@@ -7,15 +7,18 @@ struct CloudVisionEngine: RecognitionEngine {
     let mode: RecognitionMode = .vision
 
     static let prompt = """
-你是餐饮原材料库存识别助手。请看图识别包装上的原材料，并只返回一个 JSON 对象（不要多余解释）：
-{
-  "sku_name": "标准品名，如 精品肥牛卷",
-  "unit_name": "规格，如 大箱 / 中盒 / 散包（不确定留空）",
-  "production_date": "生产日期 yyyy-MM-dd（看图，不确定留空）",
-  "expiration_date": "保质期截止 yyyy-MM-dd（看图，不确定留空）",
-  "confidence": 0.0到1.0 你对该识别的把握
-}
-"""
+    你是智能库存与商品物料识别助手。请看图识别包装上的商品，并直接返回单行紧凑 JSON（不要多余解释）：
+    {
+      "sku_name": "标准品名，如 精品肥牛卷 / 502胶水",
+      "unit_name": "规格单位，如 箱 / 盒 / 瓶 / 包 / 个 / kg",
+      "category_name": "品类，如 食品 / 五金 / 日化 / 耗材",
+      "shelf_life_days": 365,
+      "barcode": "条形码（若可见）",
+      "production_date": "生产日期 yyyy-MM-dd",
+      "expiration_date": "到期日期 yyyy-MM-dd",
+      "confidence": 0.95
+    }
+    """
 
     func recognize(_ input: RecognitionInput, context: ModelContext) async -> RecognitionResult {
         guard let img = input.visionImage else {
@@ -58,14 +61,26 @@ struct CloudVisionEngine: RecognitionEngine {
         let conf = raw.confidence
         let prod = parseDate(raw.productionDate)
         var exp = parseDate(raw.expirationDate)
-        if exp == nil, let p = prod, let sku, sku.shelfLifeDays > 0 {
-            exp = Calendar.current.date(byAdding: .day, value: sku.shelfLifeDays, to: p)
+        let shelfLife = raw.shelfLifeDays ?? sku?.shelfLifeDays
+        if exp == nil, let p = prod, let days = shelfLife, days > 0 {
+            exp = Calendar.current.date(byAdding: .day, value: days, to: p)
         }
         let needsLearning = sku == nil || conf < 0.6
         let unit = sku?.packagingUnits.first
-        return RecognitionResult(sku: sku, packagingUnit: unit, confidence: conf,
-                                 mode: .vision, needsLearning: needsLearning,
-                                 recognizedName: raw.skuName, productionDate: prod, expirationDate: exp)
+        return RecognitionResult(
+            sku: sku,
+            packagingUnit: unit,
+            confidence: conf,
+            mode: .vision,
+            needsLearning: needsLearning,
+            recognizedName: raw.skuName,
+            recognizedUnit: raw.unitName,
+            recognizedCategory: raw.categoryName,
+            recognizedShelfLifeDays: shelfLife,
+            recognizedBarcode: raw.barcode,
+            productionDate: prod,
+            expirationDate: exp
+        )
     }
 
     /// 宽松日期解析：优先 yyyy-MM-dd，兼容 yyyy.MM.dd / yyyy/MM/dd

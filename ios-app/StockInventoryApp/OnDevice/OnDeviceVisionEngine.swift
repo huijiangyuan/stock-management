@@ -43,11 +43,11 @@ final class OnDeviceVisionEngine: ObservableObject {
 
     // MARK: - Prompt
 
-    /// 入库识别 Prompt：要求模型以 JSON 输出结构化字段。
+    /// 入库识别 Prompt：要求模型以单行紧凑 JSON 输出完整结构化字段，禁止冗余废话。
     static let inboundPrompt = """
-    请识别这张图片中的库存原材料/商品，并尽量以 JSON 输出：\
-    {"名称":"","规格单位":"","生产日期":"","保质期":"","置信度":0.0}。\
-    无法确定的字段留空或填0。生产日期与保质期若为"2026-08-01"格式。
+    请识别图片中的库存商品/原材料。直接以单行紧凑 JSON 输出，不要输出任何思考过程或多余解释：
+    {"名称":"商品品名","规格单位":"个/包/盒/瓶/箱/kg","品类":"分类(如食品/五金/日化/耗材)","保质期天数":365,"生产日期":"YYYY-MM-DD","保质期":"YYYY-MM-DD","条码":"","置信度":0.95}
+    无法确定的字段留空字符串或填0。
     """
 
     // MARK: - Init
@@ -69,6 +69,11 @@ final class OnDeviceVisionEngine: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+    }
+
+    /// 最近一次推理的性能指标摘要（供 UI / 诊断日志观测）
+    var latestMetricsSummary: String? {
+        wrapper.latestMetrics?.summary
     }
 
     // MARK: - 加载（模型路径由 ModelManager 提供）
@@ -97,7 +102,7 @@ final class OnDeviceVisionEngine: ObservableObject {
                 mmprojPath: mmprojPath,
                 nPredict: 64,
                 nCtx: 1536,
-                nThreads: 4,
+                nThreads: MTMDParams.optimalThreadCount,
                 temperature: 0.7,
                 useGPU: false,
                 mmprojUseGPU: false,
@@ -111,7 +116,7 @@ final class OnDeviceVisionEngine: ObservableObject {
                 level: .info,
                 category: .ai,
                 message: "MiniCPM-V 模型加载完成",
-                details: "CPU, ctx=1536, batch=512, ubatch=128, output=64 tokens, vision<=448px"
+                details: "CPU (\(params.nThreads) threads), ctx=1536, batch=512, ubatch=128, output=64 tokens, vision<=448px"
             )
         } catch {
             errorMessage = error.localizedDescription
@@ -148,9 +153,7 @@ final class OnDeviceVisionEngine: ObservableObject {
                                       recognizedName: nil)
         }
 
-        // 二次护栏：recognition 入口再确认环境安全（loadSuccess 可能来自更早的
-        // 安全环境；运行期内存压力也可能使本机变为不安全）。不安全则直接兜底，
-        // 绝不触碰 wrapper，避免进入 C/Metal 层触发原生崩溃。
+        // 二次护栏：recognition 入口再确认环境安全
         let env = OnDeviceSafeEnvironment.evaluate(phase: .imageInference)
         AppLogger.shared.log(
             level: env.safe ? .info : .error,
@@ -200,10 +203,14 @@ final class OnDeviceVisionEngine: ObservableObject {
         }
 
         wrapper.clearKVCacheForNewTurn()
+        let inferenceStartTime = Date()
         do {
             try await wrapper.addImageInBackground(url.path)
             try await wrapper.addTextInBackground(prompt)
-            try await wrapper.startGeneration()
+            // 启用结构化 JSON 闭合早停：一旦识别出完整合法的 JSON 对象立即提前结束生成
+            try await wrapper.startGeneration(earlyStopPredicate: { text in
+                Self.isCompleteJSON(text)
+            })
         } catch {
             errorMessage = error.localizedDescription
             AppLogger.shared.log(
@@ -215,10 +222,18 @@ final class OnDeviceVisionEngine: ObservableObject {
             return RecognitionResult(confidence: 0, mode: .vision, needsLearning: true, recognizedName: nil)
         }
 
-        // 直接读 wrapper.fullOutput（源真相）：startGeneration 现已 await 到生成
-        // 结束，fullOutput 已在主线程填好。避免依赖 Combine sink → outputText 的
-        // 异步投递在 parse 时尚未到达，从而重蹈"安全环境也返回空结果"的覆辙。
-        return Self.parseResult(wrapper.fullOutput, imageData: imageData)
+        let totalElapsed = Date().timeIntervalSince(inferenceStartTime)
+        let metricsSummary = wrapper.latestMetrics?.summary ?? String(format: "total=%.2fs", totalElapsed)
+        let parsed = Self.parseResult(wrapper.fullOutput, imageData: imageData)
+
+        AppLogger.shared.log(
+            level: .info,
+            category: .ai,
+            message: "MiniCPM-V 端侧推理与解析完成",
+            details: "name=\(parsed.recognizedName ?? "无"), conf=\(parsed.confidence), metrics=\(metricsSummary), rawLength=\(wrapper.fullOutput.count)"
+        )
+
+        return parsed
     }
 
     func cancelCurrentRecognition(reason: String) {
@@ -232,37 +247,201 @@ final class OnDeviceVisionEngine: ObservableObject {
         )
     }
 
-    // MARK: - 解析
+    // MARK: - 判定与解析
 
-    /// 从模型输出里抠 JSON，映射到 RecognitionResult。
-    private static func parseResult(_ text: String, imageData: Data) -> RecognitionResult {
+    /// 判定输出文本中是否已生成完整的闭合 JSON 结构（用于提前早停）
+    static func isCompleteJSON(_ text: String) -> Bool {
         guard let start = text.range(of: "{"),
               let end = text.range(of: "}", options: .backwards),
-              let data = text[start.lowerBound...end.upperBound].data(using: .utf8),
+              start.lowerBound < end.upperBound else {
+            return false
+        }
+        let candidate = String(text[start.lowerBound...end.upperBound])
+        guard let data = candidate.data(using: .utf8),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            // 没解析到 JSON：仍带回原文，标记需要人工确认
-            return RecognitionResult(confidence: 0.3, mode: .vision, needsLearning: true,
-                                      recognizedName: text.isEmpty ? nil : String(text.prefix(40)))
+            return false
+        }
+        // 确保至少存在核心字段且有内容
+        let hasName = (dict["名称"] as? String)?.isEmpty == false
+        let hasUnit = (dict["规格单位"] as? String)?.isEmpty == false
+        return hasName || hasUnit || dict.count >= 2
+    }
+
+    /// 从模型输出里容错提取 JSON 并映射到 RecognitionResult。
+    static func parseResult(_ text: String, imageData: Data) -> RecognitionResult {
+        let cleaned = cleanOutput(text)
+
+        // 1. 尝试直接解析标准 JSON
+        if let dict = extractJSONDictionary(from: cleaned) {
+            return buildResult(from: dict, rawText: text)
         }
 
-        let str = { (k: String) -> String? in
-            guard let v = dict[k] else { return nil }
-            if let s = v as? String, !s.isEmpty { return s }
-            if let n = v as? NSNumber { return n.stringValue }
+        // 2. 尝试修复未闭合的截断 JSON
+        if let repairedDict = tryRepairAndExtractJSON(from: cleaned) {
+            return buildResult(from: repairedDict, rawText: text)
+        }
+
+        // 3. 正则保底提取字段
+        if let regexDict = extractByRegex(from: cleaned) {
+            return buildResult(from: regexDict, rawText: text)
+        }
+
+        // 4. 完全未匹配到结构化数据：提取非空纯文本片段兜底
+        let fallbackName = cleaned.isEmpty ? nil : String(cleaned.prefix(40)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return RecognitionResult(
+            confidence: 0.3,
+            mode: .vision,
+            needsLearning: true,
+            recognizedName: fallbackName
+        )
+    }
+
+    // MARK: - 容错解析内部函数
+
+    private static func cleanOutput(_ text: String) -> String {
+        var str = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 剥离 Markdown 代码块 ```json ... ```
+        if str.hasPrefix("```json") {
+            str = String(str.dropFirst(7))
+        } else if str.hasPrefix("```") {
+            str = String(str.dropFirst(3))
+        }
+        if str.hasSuffix("```") {
+            str = String(str.dropLast(3))
+        }
+        return str.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func extractJSONDictionary(from text: String) -> [String: Any]? {
+        guard let start = text.range(of: "{"),
+              let end = text.range(of: "}", options: .backwards),
+              start.lowerBound < end.upperBound else {
+            return nil
+        }
+        let jsonSub = text[start.lowerBound...end.upperBound]
+        guard let data = jsonSub.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return dict
+    }
+
+    private static func tryRepairAndExtractJSON(from text: String) -> [String: Any]? {
+        guard let start = text.range(of: "{") else { return nil }
+        var candidate = String(text[start.lowerBound...])
+
+        // 补齐可能缺失的右引号和右大括号
+        let quoteCount = candidate.filter { $0 == "\"" }.count
+        if quoteCount % 2 != 0 {
+            candidate += "\""
+        }
+        if !candidate.hasSuffix("}") {
+            candidate += "}"
+        }
+
+        guard let data = candidate.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return dict
+    }
+
+    private static func extractByRegex(from text: String) -> [String: Any]? {
+        var dict: [String: Any] = [:]
+
+        let extractValue = { (pattern: String) -> String? in
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+            let nsString = text as NSString
+            guard let match = regex.firstMatch(in: text, options: [], range: NSRange(location: 0, length: nsString.length)),
+                  match.numberOfRanges > 1 else { return nil }
+            let range = match.range(at: 1)
+            guard range.location != NSNotFound else { return nil }
+            return nsString.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if let name = extractValue("\"(?:名称|name|sku_name|商品名称|品名)\"\\s*:\\s*\"([^\"]+)\"") {
+            dict["名称"] = name
+        }
+        if let unit = extractValue("\"(?:规格单位|单位|unit|unit_name|包装单位)\"\\s*:\\s*\"([^\"]+)\"") {
+            dict["规格单位"] = unit
+        }
+        if let cat = extractValue("\"(?:品类|category|category_name|分类)\"\\s*:\\s*\"([^\"]+)\"") {
+            dict["品类"] = cat
+        }
+        if let daysStr = extractValue("\"(?:保质期天数|保质期天|shelf_life_days|shelf_life)\"\\s*:\\s*([0-9]+)") {
+            dict["保质期天数"] = Int(daysStr)
+        }
+        if let code = extractValue("\"(?:条码|barcode|条形码)\"\\s*:\\s*\"([^\"]+)\"") {
+            dict["条码"] = code
+        }
+        if let prod = extractValue("\"(?:生产日期|prod_date|production_date)\"\\s*:\\s*\"([^\"]+)\"") {
+            dict["生产日期"] = prod
+        }
+        if let exp = extractValue("\"(?:保质期|到期日期|exp_date|expiration_date)\"\\s*:\\s*\"([^\"]+)\"") {
+            dict["保质期"] = exp
+        }
+        if let confStr = extractValue("\"(?:置信度|confidence)\"\\s*:\\s*([0-9.]+)"),
+           let conf = Double(confStr) {
+            dict["置信度"] = conf
+        }
+
+        return dict.isEmpty ? nil : dict
+    }
+
+    private static func buildResult(from dict: [String: Any], rawText: String) -> RecognitionResult {
+        let str = { (keys: [String]) -> String? in
+            for k in keys {
+                if let v = dict[k] {
+                    if let s = v as? String, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                    if let n = v as? NSNumber { return n.stringValue }
+                }
+            }
             return nil
         }
 
-        let name = str("名称")
-        let unit = str("规格单位")
-        let prod = str("生产日期").flatMap { Self.parseDate($0) }
-        let exp = str("保质期").flatMap { Self.parseDate($0) }
-        let conf = (dict["置信度"] as? NSNumber)?.doubleValue ?? 0.5
+        let name = str(["名称", "sku_name", "name", "商品名称", "品名"])
+        let unit = str(["规格单位", "unit", "unit_name", "单位", "包装单位"])
+        let category = str(["品类", "category", "category_name", "分类"])
+        let barcode = str(["条码", "barcode", "条形码"])
+
+        var shelfLifeDays: Int? = nil
+        for k in ["保质期天数", "shelf_life_days", "保质期天", "shelf_life"] {
+            if let v = dict[k] {
+                if let n = v as? NSNumber { shelfLifeDays = n.intValue; break }
+                if let s = v as? String {
+                    let digits = s.filter { $0.isNumber }
+                    if let d = Int(digits), d > 0 {
+                        // 如果包含“月”则乘 30
+                        if s.contains("月") || s.contains("month") {
+                            shelfLifeDays = d * 30
+                        } else if s.contains("年") || s.contains("year") {
+                            shelfLifeDays = d * 365
+                        } else {
+                            shelfLifeDays = d
+                        }
+                        break
+                    }
+                }
+            }
+        }
+
+        let prod = str(["生产日期", "prod_date", "production_date"]).flatMap { Self.parseDate($0) }
+        let exp = str(["保质期", "到期日期", "exp_date", "expiration_date"]).flatMap { Self.parseDate($0) }
+        let conf = (dict["置信度"] as? NSNumber)?.doubleValue ?? ((dict["confidence"] as? Double) ?? ((dict["置信度"] as? Double) ?? 0.5))
 
         return RecognitionResult(
+            sku: nil,
+            packagingUnit: nil,
             confidence: conf,
             mode: .vision,
             needsLearning: conf < 0.6,
             recognizedName: name,
+            recognizedUnit: unit,
+            recognizedCategory: category,
+            recognizedShelfLifeDays: shelfLifeDays,
+            recognizedBarcode: barcode,
             productionDate: prod,
             expirationDate: exp
         )
@@ -278,7 +457,6 @@ final class OnDeviceVisionEngine: ObservableObject {
             return url
         }
     }
-
 
     private static func parseDate(_ s: String) -> Date? {
         let fmts = ["yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd"]

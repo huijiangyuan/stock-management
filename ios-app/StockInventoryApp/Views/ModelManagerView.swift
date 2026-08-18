@@ -34,10 +34,25 @@ struct ModelManagerView: View {
                         .foregroundColor(memoryAssessment.safe ? .brand : .danger)
                 }
                 HStack {
+                    Text("校验缓存")
+                    Spacer()
+                    Text(mgr.isValidationCached ? "已验证 (秒开就绪)" : "未缓存 / 待验证")
+                        .foregroundColor(mgr.isValidationCached ? .brand : .secondary)
+                }
+                HStack {
                     Text("推理引擎")
                     Spacer()
                     Text(mgr.loaded ? "已加载" : "未加载")
                         .foregroundColor(mgr.loaded ? .brand : .secondary)
+                }
+                if let metrics = OnDeviceVisionEngine.shared.latestMetricsSummary {
+                    HStack {
+                        Text("最近推理性能")
+                        Spacer()
+                        Text(metrics)
+                            .font(.caption.monospaced())
+                            .foregroundColor(.secondary)
+                    }
                 }
                 if !mgr.message.isEmpty {
                     Text(mgr.message).font(.caption).foregroundColor(.secondary)
@@ -94,7 +109,7 @@ struct ModelManagerView: View {
                                 await mgr.load()
                             }
                         } label: {
-                            Label("加载模型", systemImage: "bolt.fill")
+                            Label("加载模型 (优先秒开)", systemImage: "bolt.fill")
                         }
                     }
                 }
@@ -114,9 +129,20 @@ struct ModelManagerView: View {
                 Text(mgr.expectedHashDisplay)
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
-                Text("下载完成后会流式计算 sha256 并与内置预期哈希比对；手动放入的文件在「加载」时同样校验，防止被篡改。")
+                Text("下载完成后会流式计算 sha256 并生成安全收据（元数据未修改时实现毫秒级秒开）；手动放入的文件在初次加载时同样进行严格完整性校验。")
                     .font(.caption).foregroundColor(.secondary)
-            } header: { Label("安全校验", systemImage: "checkmark.shield") }
+
+                if mgr.modelPresent {
+                    Button(role: .none) {
+                        Task {
+                            await mgr.reverifyAndLoad()
+                        }
+                    } label: {
+                        Label("重新全量计算并校验 SHA-256", systemImage: "arrow.clockwise.shield")
+                    }
+                    .disabled(isLoading || downloading)
+                }
+            } header: { Label("安全校验与完整性", systemImage: "checkmark.shield") }
 
             Section {
                 HStack(alignment: .top) {

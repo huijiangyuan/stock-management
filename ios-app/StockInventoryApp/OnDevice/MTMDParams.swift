@@ -41,13 +41,22 @@ import Foundation
     /// 端侧库存识别统一使用 128，优先压低原生工作缓冲峰值。
     public let nUbatch: Int
 
+    /// 根据当前移动设备硬件动态评估的最佳推理 CPU 线程数。
+    /// 移动端一般推荐 2~4 线程：在留出 UI/系统核的同时充分调用性能核（P-Core），避免过多能效核拖慢。
+    public static var optimalThreadCount: Int {
+        let count = ProcessInfo.processInfo.activeProcessorCount
+        if count <= 2 { return max(1, count) }
+        if count <= 4 { return 3 }
+        return min(4, count - 1)
+    }
+
     /// 初始化方法
     /// - Parameters:
     ///   - modelPath: 模型路径
     ///   - mmprojPath: 多模态投影模型路径
     ///   - nPredict: 输出 token 上限，默认 64；库存 JSON 已足够，避免异常长生成。
     ///   - nCtx: 上下文长度，默认 1536；单图库存识别不走视频上下文，降低 KV 峰值。
-    ///   - nThreads: 线程数，默认 4
+    ///   - nThreads: 线程数，默认根据设备动态评估最佳线程数（2~4）
     ///   - temperature: 温度参数，默认 0.7（对齐模型 generation_config.json：
     ///     do_sample=true, temperature=0.7, top_k=0, top_p=1.0, repetition_penalty=1.0；
     ///     top_k 与 top_p 由 MBMtmd.mm 内部统一设为禁用值，纯温度采样）
@@ -59,7 +68,7 @@ import Foundation
         mmprojPath: String,
         nPredict: Int = 64,
         nCtx: Int = 1536,
-        nThreads: Int = 4,
+        nThreads: Int = MTMDParams.optimalThreadCount,
         temperature: Float = 0.7,
         useGPU: Bool = false,
         mmprojUseGPU: Bool = false,

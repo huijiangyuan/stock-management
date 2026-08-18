@@ -9,6 +9,22 @@ import Foundation
 import Combine
 
 
+/// MTMD 生成推理性能指标
+public struct MTMDInferenceMetrics: Sendable, Equatable {
+    public let decodeDuration: TimeInterval
+    public let generatedTokenCount: Int
+    public let tokensPerSecond: Double
+    public let earlyStopped: Bool
+
+    public var summary: String {
+        String(format: "decode=%.2fs (%d tokens, %.1f tok/s%@)",
+               decodeDuration,
+               generatedTokenCount,
+               tokensPerSecond,
+               earlyStopped ? ", 早停" : "")
+    }
+}
+
 /// MTMD 多模态推理包装器
 @MainActor
 public class MTMDWrapper: ObservableObject {
@@ -30,6 +46,9 @@ public class MTMDWrapper: ObservableObject {
     /// 是否有内容可以生成
     @Published public private(set) var hasContent: Bool = false
     
+    /// 最近一次推理的性能指标
+    @Published public private(set) var latestMetrics: MTMDInferenceMetrics?
+
     /// 是否为纯文本模型（影响 <think> 注入行为）
     public var isTextOnlyModel: Bool = false
     
@@ -267,7 +286,8 @@ public class MTMDWrapper: ObservableObject {
     }
     
     /// 开始生成
-    public func startGeneration() async throws {
+    /// - Parameter earlyStopPredicate: 可选的提前早停谓词。输入为当前已累加的输出文本，返回 true 则提前结束推理。
+    public func startGeneration(earlyStopPredicate: (@Sendable (String) -> Bool)? = nil) async throws {
         guard initializationState == .initialized else {
             throw MTMDError.contextNotInitialized
         }
@@ -287,12 +307,11 @@ public class MTMDWrapper: ObservableObject {
         generationTask?.cancel()
 
         // 创建新的生成任务并 await 其完成：让 recognize 在 startGeneration 返回时
-        // wrapper.fullOutput 已填好，从而能正确 parseResult（修复"安全环境也返回
-        // 空结果"）。performGeneration 内部是 while !Task.isCancelled 循环直到 is_end
-        // 才 return，且每次 mb_mtmd_loop 前后都有 Task.sleep 挂起点，await 是安全的；
-        // 重活（mb_mtmd_loop 的 C 调用）实际跑在后台全局队列，不会阻塞主线程。
+        // wrapper.fullOutput 已填好，从而能正确 parseResult。
+        // 重构后密集的 C++ 原生推理循环完全在后台任务中全速连续运行，彻底移除了逐 token 的 Task.sleep 人工延迟，
+        // 并以 20fps 节流向主线程广播更新。
         let task = Task {
-            await performGeneration()
+            await performGeneration(earlyStopPredicate: earlyStopPredicate)
         }
         generationTask = task
         await task.value
@@ -333,6 +352,7 @@ public class MTMDWrapper: ObservableObject {
         fullOutput = ""
         hasContent = false
         isTextOnlyModel = false
+        latestMetrics = nil
         params = nil
         
         print("MTMDWrapper: 上下文已重置")
@@ -365,105 +385,102 @@ public class MTMDWrapper: ObservableObject {
     
     // MARK: - Private Methods
     
-    /// 执行生成
-    ///
-    /// **节流设计**：这里有一个**本地累加 buffer + 周期性 flush** 的策略。
-    /// 不能简单地"每 token 都 `fullOutput += ...`"，因为：
-    ///   1. MTMDWrapper 是 @MainActor，每次属性赋值都会被强制 hop 回主线程
-    ///   2. fullOutput 是 @Published，每次写都广播给 MTMDWrapperExample.outputText，
-    ///      再广播给 MBHomeViewController 的 sink，最终触发 cell 重绘 / boundingRect /
-    ///      tableView scroll 一整条主线程链
-    ///   3. 推理在后台跑得很快（几十 ms/token），意味着主线程被持续高频打扰
-    ///
-    /// 现象上的恶果：用户在生成期间点输入框 / 打字会感觉到"互斥卡顿"，第三方
-    /// 输入法 candidate accumulator 还会出现 `Result accumulator timeout: 3.0s`。
-    ///
-    /// 修复策略：本地变量 `accumulated` 全程累加，只在以下时机把它同步到
-    /// @Published fullOutput（触发广播）：
-    ///   - 第一个 token：让 UI 立刻有反馈（lastFlush 设为 distantPast）
-    ///   - 距上次 flush ≥ ``flushIntervalMs`` 毫秒：把刷新降到 ~20 fps，对人眼仍然丝滑
-    ///   - 生成结束：保证最后一段一定可见
-    ///
-    /// 主线程负载从"每 token 一次" → "≤20 次/秒"，下游 sink 链跟着减负。
-    private func performGeneration() async {
+    /// 供后台生成循环节流回调主线程更新 UI 状态
+    private func updateStreamingOutput(fullText: String, token: String, isEnd: Bool) {
+        self.currentToken = MTMDToken(content: token, isEnd: isEnd)
+        self.fullOutput = fullText
+    }
+
+    /// 执行全速非阻塞生成
+    private func performGeneration(earlyStopPredicate: (@Sendable (String) -> Bool)?) async {
         guard let ctx = context else {
             updateGenerationState(.failed(.contextNotInitialized))
             return
         }
 
-        // For text-only models (MiniCPM5), <think>\n is injected into the
-        // prompt as a special token, so the model won't generate it itself.
-        // Pre-seed fullOutput so the UI can parse <think>...</think> blocks.
-        // Mirrors Android's cached_token_chars = "<think>\n" logic.
-        var accumulated: String = isTextOnlyModel ? "<think>\n" : ""
-        fullOutput = accumulated
+        let initialAccumulated: String = isTextOnlyModel ? "<think>\n" : ""
+        fullOutput = initialAccumulated
         let predictionLimit = max(params?.nPredict ?? 64, 1)
-        var generatedTokenCount = 0
 
-        // 50ms = 20 fps 节流。再短主线程会被打扰太多次（每帧 sink → markdown
-        // 高度计算 → scroll），再长用户能看出"一卡一卡"出字（不流畅）。
-        let flushIntervalMs: TimeInterval = 0.050
-        // 用 distantPast 保证循环第一个 token 一定立即 flush，让 UI 立刻有反应。
-        var lastFlush: Date = .distantPast
+        // 密集的 C 原生推理循环完全在后台运行，消除 MainActor 乒乓切换与 Task.sleep 延迟
+        let result = await Task.detached(priority: .userInitiated) { [ctx, isTextOnlyModel, weak self] () -> (output: String, tokenCount: Int, duration: TimeInterval, earlyStopped: Bool, limitReached: Bool) in
+            var accumulated = initialAccumulated
+            var generatedTokenCount = 0
+            var earlyStopped = false
+            var limitReached = false
+            let flushIntervalMs: TimeInterval = 0.050 // 20 fps
+            var lastFlush: Date = .distantPast
+            let startTime = Date()
 
-        // 生成循环
-        while !Task.isCancelled {
+            while !Task.isCancelled {
+                // 原生推理单个 token
+                let cToken = mb_mtmd_loop(ctx)
+                let rawTokenString = cToken.token != nil ? String(cString: cToken.token!) : ""
+                let isEnd = cToken.is_end
 
-            // 在后台线程执行 C 函数调用
-            let cToken = await withCheckedContinuation { continuation in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let token = mb_mtmd_loop(ctx)
-                    continuation.resume(returning: token)
+                // 立即释放 C 字符串
+                if let tokenPtr = cToken.token {
+                    mb_mtmd_string_free(tokenPtr)
+                }
+
+                var tokenString = rawTokenString
+                if accumulated.isEmpty && tokenString == "\n" {
+                    tokenString = ""
+                }
+                accumulated += tokenString
+                if !isEnd {
+                    generatedTokenCount += 1
+                }
+
+                if generatedTokenCount >= predictionLimit {
+                    limitReached = true
+                }
+
+                // 检查早停条件（例如 JSON 已完整闭合）
+                if !isEnd && !accumulated.isEmpty && (earlyStopPredicate?(accumulated) == true) {
+                    earlyStopped = true
+                }
+
+                let now = Date()
+                let shouldFlush = isEnd || limitReached || earlyStopped || (now.timeIntervalSince(lastFlush) >= flushIntervalMs)
+
+                if shouldFlush {
+                    let currentAcc = accumulated
+                    let currentTok = tokenString
+                    Task { @MainActor in
+                        self?.updateStreamingOutput(fullText: currentAcc, token: currentTok, isEnd: isEnd || limitReached || earlyStopped)
+                    }
+                    lastFlush = now
+                }
+
+                if isEnd || limitReached || earlyStopped {
+                    break
                 }
             }
 
-            var tokenString = cToken.token != nil ? String(cString: cToken.token!) : ""
+            let duration = max(Date().timeIntervalSince(startTime), 0.001)
+            return (accumulated, generatedTokenCount, duration, earlyStopped, limitReached)
+        }.value
 
-            // 在主线程更新状态
-            currentToken = MTMDToken(content: tokenString, isEnd: cToken.is_end)
-            if accumulated.isEmpty && tokenString == "\n" {
-                tokenString = ""
-            }
-            accumulated += tokenString
-            if !cToken.is_end {
-                generatedTokenCount += 1
-            }
+        let tokensPerSec = Double(result.tokenCount) / result.duration
+        let metrics = MTMDInferenceMetrics(
+            decodeDuration: result.duration,
+            generatedTokenCount: result.tokenCount,
+            tokensPerSecond: tokensPerSec,
+            earlyStopped: result.earlyStopped
+        )
+        self.latestMetrics = metrics
+        self.fullOutput = result.output
+        self.currentToken = MTMDToken(content: "", isEnd: true)
+        self.updateGenerationState(.completed)
+        self.generationTask = nil
 
-            // 释放 native bridge 在 mb_mtmd_loop 里 malloc 出来的 token 字符串。
-            // 这个 free 是必须的；旧 mtmd-ios 时代被注释掉是因为当时漏 free，
-            // 长会话下会持续涨内存。新 bridge 必须显式归还。
-            if let tokenPtr = cToken.token {
-                mb_mtmd_string_free(tokenPtr)
-            }
-
-            // 节流：把高频 token 累加合并成 ≤20 fps 的 fullOutput 广播。
-            let now = Date()
-            let reachedPredictionLimit = generatedTokenCount >= predictionLimit
-            let shouldFlush = cToken.is_end
-                || reachedPredictionLimit
-                || now.timeIntervalSince(lastFlush) >= flushIntervalMs
-            if shouldFlush {
-                fullOutput = accumulated
-                lastFlush = now
-            }
-
-            // 检查是否生成完成
-            if cToken.is_end || reachedPredictionLimit {
-                updateGenerationState(.completed)
-                if reachedPredictionLimit && !cToken.is_end {
-                    print("MTMDWrapper: 达到输出上限 \(predictionLimit) token，结束生成")
-                } else {
-                    print("MTMDWrapper: 生成完成: \(fullOutput)")
-                }
-                // 清理任务引用但不重置状态，让状态保持为 completed
-                // 注意：不在这里清 KV cache，否则多轮上下文会丢。
-                // KV 的清理统一交给显式 reset()（切换模型 / 新对话入口）
-                generationTask = nil
-                return
-            }
-
-            // 避免过度占用 CPU
-            try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
+        if result.earlyStopped {
+            print("MTMDWrapper: 提前早停命中，耗时 \(String(format: "%.2f", result.duration))s, 生成 \(result.tokenCount) tokens (\(String(format: "%.1f", tokensPerSec)) tok/s)")
+        } else if result.limitReached {
+            print("MTMDWrapper: 达到输出上限 \(predictionLimit) token，耗时 \(String(format: "%.2f", result.duration))s")
+        } else {
+            print("MTMDWrapper: 生成完成，耗时 \(String(format: "%.2f", result.duration))s, \(result.tokenCount) tokens (\(String(format: "%.1f", tokensPerSec)) tok/s)")
         }
     }
     

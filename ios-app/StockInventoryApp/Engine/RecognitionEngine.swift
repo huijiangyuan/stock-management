@@ -15,7 +15,7 @@ struct RecognitionInput {
     var visionImage: Data?   // 摄像头拍照 JPEG
 }
 
-/// 识别结果。视觉识别会带回 recognizedName / 生产日期 / 到期日，供入库单预填。
+/// 识别结果。视觉识别会带回品名、单位、品类、保质期天数、生产日期与到期日，供商品建档与入库单自动完整填表。
 struct RecognitionResult {
     var sku: RawMaterialSKU?
     var packagingUnit: PackagingUnit?
@@ -23,6 +23,10 @@ struct RecognitionResult {
     var mode: RecognitionMode
     var needsLearning: Bool
     var recognizedName: String?
+    var recognizedUnit: String?
+    var recognizedCategory: String?
+    var recognizedShelfLifeDays: Int?
+    var recognizedBarcode: String?
     var productionDate: Date?
     var expirationDate: Date?
 
@@ -32,6 +36,10 @@ struct RecognitionResult {
          mode: RecognitionMode,
          needsLearning: Bool,
          recognizedName: String? = nil,
+         recognizedUnit: String? = nil,
+         recognizedCategory: String? = nil,
+         recognizedShelfLifeDays: Int? = nil,
+         recognizedBarcode: String? = nil,
          productionDate: Date? = nil,
          expirationDate: Date? = nil) {
         self.sku = sku
@@ -40,9 +48,46 @@ struct RecognitionResult {
         self.mode = mode
         self.needsLearning = needsLearning
         self.recognizedName = recognizedName
+        self.recognizedUnit = recognizedUnit
+        self.recognizedCategory = recognizedCategory
+        self.recognizedShelfLifeDays = recognizedShelfLifeDays
+        self.recognizedBarcode = recognizedBarcode
         self.productionDate = productionDate
         self.expirationDate = expirationDate
     }
+
+    /// 显示或建库使用的有效单位名称
+    var displayUnitName: String? {
+        packagingUnit?.unitName ?? recognizedUnit
+    }
+
+    /// 显示或建库使用的有效品类名称
+    var displayCategoryName: String? {
+        sku?.categoryName ?? recognizedCategory
+    }
+
+    /// 显示或建库使用的有效保质期天数
+    var displayShelfLifeDays: Int? {
+        if let days = sku?.shelfLifeDays, days > 0 { return days }
+        if let days = recognizedShelfLifeDays, days > 0 { return days }
+        if let p = productionDate, let e = expirationDate {
+            let diff = Calendar.current.dateComponents([.day], from: p, to: e).day ?? 0
+            if diff > 0 { return diff }
+        }
+        return nil
+    }
+}
+
+/// 新品登记建档预填草稿数据包
+struct SKUPrefillDraft: Sendable {
+    var skuName: String
+    var categoryName: String
+    var baseUnit: String
+    var shelfLifeDays: Int
+    var barcode: String?
+    var productionDate: Date?
+    var expirationDate: Date?
+    var visionOutcome: VisionRecognitionOutcome?
 }
 
 enum VisionRecognitionSource: String, Sendable {

@@ -11,6 +11,8 @@ struct SKUFormView: View {
     var initialBarcode: String? = nil
     /// AI 识别后预填的商品名称（新品登记快速通道）
     var initialName: String? = nil
+    /// AI 识别或外部传入的完整新品预填草稿
+    var initialDraft: SKUPrefillDraft? = nil
     /// 保存成功后的回调，将新创建/修改的 SKU 回传给调用方
     var onSaved: ((RawMaterialSKU) -> Void)? = nil
 
@@ -100,7 +102,7 @@ struct SKUFormView: View {
                             if let msg = aiBannerMsg, showAiBanner {
                                 Text(msg)
                                     .font(.caption)
-                                    .foregroundColor(msg.contains("成功") ? .green : .orange)
+                                    .foregroundColor(msg.contains("成功") || msg.contains("就绪") ? .green : .orange)
                                     .multilineTextAlignment(.leading)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -202,13 +204,26 @@ struct SKUFormView: View {
 
     private func loadIfEditing() {
         guard let s = editing else {
+            let randomCodeSuffix = String(format: "%04d", Int.random(in: 1000...9999))
+            skuCode = "SKU-\(randomCodeSuffix)"
+
+            if let draft = initialDraft {
+                skuName = draft.skuName
+                categoryName = draft.categoryName
+                baseUnit = draft.baseUnit
+                shelfLifeDays = draft.shelfLifeDays > 0 ? "\(draft.shelfLifeDays)" : "0"
+                let unitName = draft.baseUnit.isEmpty ? "散包" : draft.baseUnit
+                units = [PackagingUnitDraft(unitName: unitName, unitType: "BASE", conversionRatio: "1", barcode: draft.barcode ?? "")]
+                capturedOutcome = draft.visionOutcome
+                aiBannerMsg = "✨ AI 识别预填已就绪：商品名称「\(draft.skuName)」及品类、单位、保质期已自动填入！"
+                showAiBanner = true
+                return
+            }
+
             var base = PackagingUnitDraft(unitName: "散包", unitType: "BASE", conversionRatio: "1")
             if let bc = initialBarcode { base.barcode = bc }
             units = [base]
-            // AI 识别新品登记：预填名称并自动生成预设 SKU 编码
             if let name = initialName { skuName = name }
-            let randomCodeSuffix = String(format: "%04d", Int.random(in: 1000...9999))
-            skuCode = "SKU-\(randomCodeSuffix)"
             return
         }
         skuCode = s.skuCode; skuName = s.skuName; categoryName = s.categoryName
@@ -298,19 +313,42 @@ struct SKUFormView: View {
         }
         let result = outcome.result
 
-        if let name = result.recognizedName, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        var filledFields: [String] = []
+
+        if let name = result.recognizedName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
             skuName = name
-            if let exp = result.expirationDate, let prod = result.productionDate {
-                let days = Calendar.current.dateComponents([.day], from: prod, to: exp).day ?? 0
-                if days > 0 { shelfLifeDays = "\(days)" }
+            filledFields.append("品名「\(name)」")
+        }
+        if let cat = result.displayCategoryName?.trimmingCharacters(in: .whitespacesAndNewlines), !cat.isEmpty {
+            categoryName = cat
+            filledFields.append("品类「\(cat)」")
+        }
+        if let unit = result.displayUnitName?.trimmingCharacters(in: .whitespacesAndNewlines), !unit.isEmpty {
+            baseUnit = unit
+            if !units.isEmpty {
+                units[0].unitName = unit
+            } else {
+                units = [PackagingUnitDraft(unitName: unit, unitType: "BASE", conversionRatio: "1")]
             }
-            if let unit = result.packagingUnit {
-                baseUnit = unit.unitName
+            filledFields.append("单位「\(unit)」")
+        }
+        if let days = result.displayShelfLifeDays, days > 0 {
+            shelfLifeDays = "\(days)"
+            filledFields.append("保质期 \(days) 天")
+        }
+        if let barcode = result.recognizedBarcode?.trimmingCharacters(in: .whitespacesAndNewlines), !barcode.isEmpty {
+            if !units.isEmpty {
+                units[0].barcode = barcode
             }
-            aiBannerMsg = "✨ AI 识别成功：已自动为你预填商品名称「\(name)」！"
+            filledFields.append("条码")
+        }
+
+        if !filledFields.isEmpty {
+            let summary = filledFields.joined(separator: " · ")
+            aiBannerMsg = "✨ AI 智能填表成功：已自动填充 \(summary)"
             showAiBanner = true
-            AppLogger.shared.log(level: .info, category: .ai, message: "AI 拍照自动预填成功: 「\(name)」")
-            ToastManager.shared.show(message: "✨ AI 识别预填成功", details: "商品名称: \(name)", tone: .success)
+            AppLogger.shared.log(level: .info, category: .ai, message: "AI 拍照自动完整填表成功: \(summary)")
+            ToastManager.shared.show(message: "✨ AI 智能填表成功", details: summary, tone: .success)
         } else {
             aiBannerMsg = "⚠️ AI 未能在图片中识出明确商品名称，请手动填写基础信息。"
             showAiBanner = true

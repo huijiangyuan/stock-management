@@ -21,7 +21,7 @@ struct OrderCreateView: View {
         case skuPicker
         case scanner
         case camera
-        case learn(barcode: String?, prefillName: String?)
+        case learn(barcode: String?, prefillName: String?, draft: SKUPrefillDraft? = nil)
         case visionResult(VisionRecognitionOutcome)
 
         var id: String {
@@ -29,7 +29,7 @@ struct OrderCreateView: View {
             case .skuPicker: return "skuPicker"
             case .scanner: return "scanner"
             case .camera: return "camera"
-            case .learn(let b, let n): return "learn_\(b ?? "")_\(n ?? "")"
+            case .learn(let b, let n, let d): return "learn_\(b ?? "")_\(n ?? "")_\(d?.skuName ?? "")"
             case .visionResult: return "visionResult"
             }
         }
@@ -84,6 +84,47 @@ struct OrderCreateView: View {
         NavigationStack {
             ZStack {
                 Form {
+                    Section {
+                        VStack(spacing: 8) {
+                            HStack(spacing: 12) {
+                                Button {
+                                    activeSheet = .camera
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "camera.viewfinder")
+                                        Text("📷 拍照 AI 识别")
+                                            .fontWeight(.semibold)
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .background(Color.brand)
+                                    .foregroundColor(.white)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    activeSheet = .scanner
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "barcode.viewfinder")
+                                        Text("扫码识别")
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .background(Color.surface)
+                                    .foregroundColor(.primary)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                            }
+
+                            // ── 端侧 AI 模型自动加载中动态动画提示 Banner ────
+                            ModelAutoLoadingBannerView()
+
+                            aiEngineStatusBadge
+                        }
+                        .padding(.vertical, 4)
+                    }
+
                     Section("单据类型") {
                         Picker("类型", selection: $orderType) {
                             Text("入库").tag("INBOUND")
@@ -91,68 +132,72 @@ struct OrderCreateView: View {
                             Text("盘点").tag("CHECK")
                         }
                         .pickerStyle(.segmented)
-                        .disabled(presetSKU != nil)
+                        .onChange(of: orderType) { _, _ in
+                            selectedBatch = inStockBatches.first
+                        }
                     }
 
                     Section("商品物料") {
-                        if let sku = selectedSKU {
+                        Button {
+                            activeSheet = .skuPicker
+                        } label: {
                             HStack {
-                                Text(sku.skuName).font(.headline)
+                                Text("选择商品")
+                                    .foregroundColor(.primary)
                                 Spacer()
-                                Button("重选") { activeSheet = .skuPicker }
+                                if let sku = selectedSKU {
+                                    Text("\(sku.skuName) (\(sku.skuCode))")
+                                        .foregroundColor(.brand)
+                                        .fontWeight(.medium)
+                                } else {
+                                    Text("点击选择")
+                                        .foregroundColor(.secondary)
+                                }
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
                             }
-                            if let u = selectedUnit {
-                                Picker("规格", selection: $selectedUnit) {
-                                    ForEach(sku.packagingUnits) { unit in
-                                        Text("\(unit.unitName) ×\(AppFormatters.fmt(unit.conversionRatio))").tag(unit as PackagingUnit?)
+                        }
+
+                        if let sku = selectedSKU {
+                            if !sku.packagingUnits.isEmpty {
+                                Picker("包装规格", selection: $selectedUnit) {
+                                    ForEach(sku.packagingUnits, id: \.unitId) { (u: PackagingUnit) in
+                                        Text("\(u.unitName) (×\(AppFormatters.fmt(u.conversionRatio)) \(sku.baseUnit))")
+                                            .tag(Optional(u))
                                     }
                                 }
                             }
-                        } else {
-                            Button("选择商品物料 / 扫码") { activeSheet = .skuPicker }
-                        }
-                        
-                        // ── AI 识别引擎健康状态指示 ──────────────────────
-                        aiEngineStatusBadge
-                        
-                        // ── 端侧模型自动加载中动态 Banner ───────────────
-                        ModelAutoLoadingBannerView()
-
-                        Button { activeSheet = .scanner } label: {
-                            Label("扫码识别", systemImage: "barcode.viewfinder")
-                        }
-                        Button { handleAIRecognizeTap() } label: {
-                            Label("AI 识别（拍照）", systemImage: "camera.viewfinder")
-                        }
-                        .disabled(visionBusy)
-                    }
-
-                    if selectedSKU != nil {
-                        Section("数量") {
                             HStack {
-                                TextField("操作数量", text: $qtyText).keyboardType(.decimalPad)
-                                if let u = selectedUnit {
-                                    Text(u.unitName).foregroundColor(.secondary)
+                                Text("操作数量")
+                                TextField("数量", text: $qtyText)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                Text(selectedUnit?.unitName ?? sku.baseUnit)
+                                    .foregroundColor(.secondary)
+                            }
+                            if let u = selectedUnit, u.conversionRatio != 1.0 {
+                                HStack {
+                                    Text("换算基准量")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    Text("= \(AppFormatters.fmt(totalBase)) \(sku.baseUnit)")
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.brand)
                                 }
                             }
-                            if let u = selectedUnit {
-                                Text("换算为 \(AppFormatters.fmt(totalBase)) \(selectedSKU?.baseUnit ?? "包")")
-                                    .font(.subheadline).foregroundColor(.secondary)
-                            }
                         }
+                    }
 
-                        Section("货位") {
-                            TextField("货位名称", text: $location)
-                        }
+                    Section("位置与单据信息") {
+                        TextField("库位 / 货架", text: $location)
+                    }
 
+                    Section(orderType == "INBOUND" ? "入库批次信息" : "批次与出库建议") {
                         if orderType == "INBOUND" {
-                            Section("新建批次") {
-                                TextField("批次号（留空自动生成）", text: $batchNo)
-                                DatePicker("生产日期", selection: $productionDate, displayedComponents: .date)
-                                DatePicker("到期日期", selection: $expirationDate, displayedComponents: .date)
-                                TextField("供应商", text: $supplier)
-                                TextField("入库单价", text: $inboundPrice).keyboardType(.decimalPad)
-                            }
+                            inboundBatchFields
                         } else {
                             batchSection
                         }
@@ -193,22 +238,26 @@ struct OrderCreateView: View {
                     CameraCaptureView { data in
                         pendingCameraData = data
                     }
-                case .learn(let barcode, let prefillName):
-                    SKUFormView(initialBarcode: barcode, initialName: prefillName, onSaved: { newSKU in
-                        selectedSKU = newSKU
-                        selectedUnit = newSKU.packagingUnits.first
-                    })
+                case .learn(let barcode, let prefillName, let draft):
+                    SKUFormView(
+                        initialBarcode: barcode,
+                        initialName: prefillName,
+                        initialDraft: draft,
+                        onSaved: { newSKU in
+                            applyNewSKUAndPrefillOrder(newSKU, from: draft)
+                        }
+                    )
                 case .visionResult(let outcome):
                     AIRecognitionResultView(
                         outcome: outcome,
                         onConfirm: {
                             applyVisionConfirmed(outcome)
                         },
-                        onQuickAdd: { name in
-                            quickAddSKUAndSelect(name: name, outcome: outcome)
+                        onQuickAdd: { draft in
+                            quickAddSKUAndSelect(draft: draft)
                         },
-                        onLearn: {
-                            deferredSheet = .learn(barcode: nil, prefillName: outcome.result.recognizedName)
+                        onLearn: { draft in
+                            deferredSheet = .learn(barcode: draft.barcode, prefillName: draft.skuName, draft: draft)
                         },
                         onManual: {
                             deferredSheet = .skuPicker
@@ -417,25 +466,29 @@ struct OrderCreateView: View {
     }
 
     @MainActor
-    private func quickAddSKUAndSelect(name: String, outcome: VisionRecognitionOutcome) {
-        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func quickAddSKUAndSelect(draft: SKUPrefillDraft) {
+        let cleanName = draft.skuName.trimmingCharacters(in: .whitespacesAndNewlines)
         let skuName = cleanName.isEmpty ? "未命名新材料" : cleanName
         let randomSuffix = String(format: "%04d", Int.random(in: 1000...9999))
         let skuCode = "SKU-\(randomSuffix)"
+        let categoryName = draft.categoryName.isEmpty ? "默认品类" : draft.categoryName
+        let baseUnit = draft.baseUnit.isEmpty ? "个" : draft.baseUnit
+        let shelfLife = draft.shelfLifeDays
         
         let newSKU = RawMaterialSKU(
             skuCode: skuCode,
             skuName: skuName,
-            categoryName: "默认品类",
-            baseUnit: "包",
-            shelfLifeDays: 30
+            categoryName: categoryName,
+            baseUnit: baseUnit,
+            shelfLifeDays: shelfLife
         )
         ctx.insert(newSKU)
 
         let baseUnitObj = PackagingUnit(
-            unitName: "散包",
+            unitName: baseUnit,
             unitType: "BASE",
             conversionRatio: 1.0,
+            barcode: draft.barcode,
             sku: newSKU
         )
         ctx.insert(baseUnitObj)
@@ -446,21 +499,43 @@ struct OrderCreateView: View {
             return
         }
 
-        // 绑定该采样的特征向量
-        didSaveLatestVisionSample = saveFeatureSample(
-            outcome: outcome,
-            sku: newSKU,
-            unit: baseUnitObj,
-            name: skuName
-        )
+        if let outcome = draft.visionOutcome {
+            didSaveLatestVisionSample = saveFeatureSample(
+                outcome: outcome,
+                sku: newSKU,
+                unit: baseUnitObj,
+                name: skuName
+            )
+            latestVisionOutcome = outcome
+        }
 
-        // 自动设为当前单据在办材料
+        // 自动设为当前单据在办材料并完整预填所有单据字段
+        applyNewSKUAndPrefillOrder(newSKU, from: draft)
+
+        AppLogger.shared.log(level: .info, category: .ai, message: "一键快捷创建商品底库并自动填表: 「\(skuName)」(\(skuCode))")
+        ToastManager.shared.show(message: "⚡️ 已快捷登记并自动填表", details: "商品「\(skuName)」· 批次及日期已填入", tone: .success)
+    }
+
+    @MainActor
+    private func applyNewSKUAndPrefillOrder(_ newSKU: RawMaterialSKU, from draft: SKUPrefillDraft?) {
         selectedSKU = newSKU
-        selectedUnit = baseUnitObj
+        selectedUnit = newSKU.packagingUnits.first
         lastMode = .vision
-
-        AppLogger.shared.log(level: .info, category: .ai, message: "一键快捷创建商品底库: 「\(skuName)」(\(skuCode))")
-        ToastManager.shared.show(message: "⚡️ 已快捷创建商品并自动选定", details: "商品名称: \(skuName)", tone: .success)
+        visionResultName = newSKU.skuName
+        if let draft = draft {
+            if let pd = draft.productionDate { productionDate = pd }
+            if let ed = draft.expirationDate { expirationDate = ed }
+            if batchNo.isEmpty { batchNo = Self.autoBatchNo(newSKU) }
+            if let outcome = draft.visionOutcome {
+                latestVisionOutcome = outcome
+            }
+        } else if let outcome = latestVisionOutcome {
+            if let pd = outcome.result.productionDate { productionDate = pd }
+            if let ed = outcome.result.expirationDate { expirationDate = ed }
+            if batchNo.isEmpty { batchNo = Self.autoBatchNo(newSKU) }
+        } else {
+            if batchNo.isEmpty { batchNo = Self.autoBatchNo(newSKU) }
+        }
     }
 
     @MainActor
@@ -471,9 +546,11 @@ struct OrderCreateView: View {
             selectedUnit = result.packagingUnit ?? sku.packagingUnits.first
             if let pd = result.productionDate { productionDate = pd }
             if let ed = result.expirationDate { expirationDate = ed }
+            if batchNo.isEmpty { batchNo = Self.autoBatchNo(sku) }
             lastMode = .vision
             visionResultName = result.recognizedName
             latestVisionOutcome = outcome
+            ToastManager.shared.show(message: "✨ 已匹配「\(sku.skuName)」并填表", details: "批次信息已自动就绪", tone: .success)
         }
     }
 

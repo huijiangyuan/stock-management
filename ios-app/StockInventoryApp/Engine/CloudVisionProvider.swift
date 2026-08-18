@@ -5,6 +5,9 @@ import UIKit
 struct VisionRawResult {
     var skuName: String?
     var unitName: String?
+    var categoryName: String?
+    var shelfLifeDays: Int?
+    var barcode: String?
     var productionDate: String?
     var expirationDate: String?
     var confidence: Double
@@ -61,7 +64,13 @@ func extractJSON(_ text: String) -> Data? {
 
 private struct VisionRawResponse: Decodable {
     let sku_name: String?
+    let name: String?
     let unit_name: String?
+    let unit: String?
+    let category: String?
+    let category_name: String?
+    let shelf_life_days: Int?
+    let barcode: String?
     let production_date: String?
     let expiration_date: String?
     let confidence: Double?
@@ -72,12 +81,23 @@ extension CloudVisionProvider {
     func parse(_ text: String) -> VisionRawResult {
         guard let data = extractJSON(text),
               let resp = try? JSONDecoder().decode(VisionRawResponse.self, from: data) else {
-            return VisionRawResult(skuName: nil, unitName: nil, productionDate: nil,
-                                   expirationDate: nil, confidence: 0)
+            return VisionRawResult(skuName: nil, unitName: nil, categoryName: nil,
+                                   shelfLifeDays: nil, barcode: nil,
+                                   productionDate: nil, expirationDate: nil, confidence: 0)
         }
-        return VisionRawResult(skuName: resp.sku_name, unitName: resp.unit_name,
-                               productionDate: resp.production_date, expirationDate: resp.expiration_date,
-                               confidence: resp.confidence ?? 0.5)
+        let name = resp.sku_name ?? resp.name
+        let unit = resp.unit_name ?? resp.unit
+        let cat = resp.category_name ?? resp.category
+        return VisionRawResult(
+            skuName: name,
+            unitName: unit,
+            categoryName: cat,
+            shelfLifeDays: resp.shelf_life_days,
+            barcode: resp.barcode,
+            productionDate: resp.production_date,
+            expirationDate: resp.expiration_date,
+            confidence: resp.confidence ?? 0.5
+        )
     }
 }
 

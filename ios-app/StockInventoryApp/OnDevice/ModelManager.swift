@@ -192,12 +192,14 @@ final class ModelManager {
             state = .failed("下载后未找到模型文件"); return
         }
         let ok = await Task.detached { () -> Bool in
-            ModelManager.verifyFile(llm, expected: ModelManager.expectedLLMSha256) &&
-            ModelManager.verifyFile(mp, expected: ModelManager.expectedMmprojSha256)
+            ModelManager.verifyFile(llm, expected: ModelManager.expectedLLMSha256, useCache: false) &&
+            ModelManager.verifyFile(mp, expected: ModelManager.expectedMmprojSha256, useCache: false)
         }.value
         if !ok {
             try? FileManager.default.removeItem(at: llm)
             try? FileManager.default.removeItem(at: mp)
+            ModelValidationCache.shared.invalidate(for: llm)
+            ModelValidationCache.shared.invalidate(for: mp)
             refreshPresence()
             state = .failed("校验失败（sha256 不匹配），已删除文件以防被篡改。请重新下载或换可信来源。")
             return
@@ -209,21 +211,27 @@ final class ModelManager {
 
     // MARK: - 加载（后台校验 + 调 OnDeviceVisionEngine）
 
-    /// 校验（内置预期哈希）并加载已存在的模型文件。供设置页「加载」与识别流程自动调用。
-    func load() async {
+    /// 校验（内置预期哈希，支持元数据缓存秒开）并加载已存在的模型文件。
+    /// - Parameter forceReverify: 是否跳过缓存强制重新计算全量 SHA-256
+    func load(forceReverify: Bool = false) async {
         let f = scanModelFiles()
         guard let llm = f.llm, let mp = f.mmproj else {
             state = .failed("未找到模型文件，请先下载或用 Files App 放入 Documents"); return
         }
         state = .verifying
-        message = "正在校验端侧模型文件的完整性（sha256）…"
+        message = forceReverify
+            ? "正在重新计算端侧模型完整性（全量 sha256）…"
+            : "正在快速确认端侧模型完整性…"
+
         let ok = await Task.detached { () -> Bool in
-            ModelManager.verifyFile(llm, expected: ModelManager.expectedLLMSha256) &&
-            ModelManager.verifyFile(mp, expected: ModelManager.expectedMmprojSha256)
+            ModelManager.verifyFile(llm, expected: ModelManager.expectedLLMSha256, useCache: !forceReverify) &&
+            ModelManager.verifyFile(mp, expected: ModelManager.expectedMmprojSha256, useCache: !forceReverify)
         }.value
         if !ok {
             try? FileManager.default.removeItem(at: llm)
             try? FileManager.default.removeItem(at: mp)
+            ModelValidationCache.shared.invalidate(for: llm)
+            ModelValidationCache.shared.invalidate(for: mp)
             refreshPresence()
             state = .failed("校验失败（sha256 不匹配），已删除损坏文件。")
             return
@@ -247,12 +255,17 @@ final class ModelManager {
         }
     }
 
+    /// 强制全量重新计算 sha256 并加载
+    func reverifyAndLoad() async {
+        await load(forceReverify: true)
+    }
+
     /// 由识别流程在端侧可用时调用：若文件存在且未加载则自动加载。
     func ensureLoaded() async {
         if OnDeviceVisionEngine.shared.loadSuccess { return }
         let f = scanModelFiles()
         guard f.llm != nil, f.mmproj != nil else { return }
-        await load()
+        await load(forceReverify: false)
     }
 
     // MARK: - Delegate 回调（从 DownloadDelegate 经 MainActor 调用）
@@ -332,10 +345,30 @@ final class ModelManager {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    nonisolated static func verifyFile(_ url: URL, expected: String?) -> Bool {
+    nonisolated static func verifyFile(_ url: URL, expected: String?, useCache: Bool = true) -> Bool {
         guard let expected, !expected.isEmpty else { return true }
-        guard let got = sha256Hex(of: url) else { return false }
-        return got.lowercased() == expected.lowercased()
+        if useCache && ModelValidationCache.shared.isValidationValid(for: url, expectedHash: expected) {
+            return true
+        }
+        guard let got = sha256Hex(of: url) else {
+            ModelValidationCache.shared.invalidate(for: url)
+            return false
+        }
+        let matched = got.lowercased() == expected.lowercased()
+        if matched {
+            ModelValidationCache.shared.recordValid(for: url, verifiedHash: got)
+        } else {
+            ModelValidationCache.shared.invalidate(for: url)
+        }
+        return matched
+    }
+
+    /// 检查当前模型文件是否已有就绪的校验收据（可秒开）
+    var isValidationCached: Bool {
+        let f = scanModelFiles()
+        guard let llm = f.llm, let mp = f.mmproj else { return false }
+        return ModelValidationCache.shared.isValidationValid(for: llm, expectedHash: Self.expectedLLMSha256)
+            && ModelValidationCache.shared.isValidationValid(for: mp, expectedHash: Self.expectedMmprojSha256)
     }
 
     /// 供 UI 展示预期哈希。

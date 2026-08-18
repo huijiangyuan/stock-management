@@ -12,10 +12,10 @@ struct AIRecognitionResultView: View {
     let outcome: VisionRecognitionOutcome
     /// 采纳识别结果并自动填表
     let onConfirm: () -> Void
-    /// 一键快捷创建材料底库并选定为当前单据材料
-    let onQuickAdd: (String) -> Void
-    /// 引导登记新 SKU（传识别出的名称预填 SKUFormView 详细配置）
-    let onLearn: () -> Void
+    /// 一键快捷创建材料底库并选定为当前单据材料（包含完整识别预填信息）
+    let onQuickAdd: (SKUPrefillDraft) -> Void
+    /// 引导登记新 SKU（带回完整 AI 识别预填草稿，打开表单直接填好）
+    let onLearn: (SKUPrefillDraft) -> Void
     /// 手动选择 SKU
     let onManual: () -> Void
     /// 重新拍照
@@ -26,8 +26,8 @@ struct AIRecognitionResultView: View {
 
     init(outcome: VisionRecognitionOutcome,
          onConfirm: @escaping () -> Void,
-         onQuickAdd: @escaping (String) -> Void,
-         onLearn: @escaping () -> Void,
+         onQuickAdd: @escaping (SKUPrefillDraft) -> Void,
+         onLearn: @escaping (SKUPrefillDraft) -> Void,
          onManual: @escaping () -> Void,
          onRetake: @escaping () -> Void) {
         self.outcome = outcome
@@ -40,6 +40,21 @@ struct AIRecognitionResultView: View {
     }
 
     private var result: RecognitionResult { outcome.result }
+
+    private var currentDraft: SKUPrefillDraft {
+        let targetName = inputName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let validName = targetName.isEmpty ? (result.recognizedName ?? "新商品物料") : targetName
+        return SKUPrefillDraft(
+            skuName: validName,
+            categoryName: result.displayCategoryName ?? "默认品类",
+            baseUnit: result.displayUnitName ?? "个",
+            shelfLifeDays: result.displayShelfLifeDays ?? 0,
+            barcode: result.recognizedBarcode,
+            productionDate: result.productionDate,
+            expirationDate: result.expirationDate,
+            visionOutcome: outcome
+        )
+    }
 
     // 置信度颜色
     private var confidenceColor: Color {
@@ -110,16 +125,26 @@ struct AIRecognitionResultView: View {
                     // ── 识别字段卡 ──────────────────────────────────
                     AppCard {
                         VStack(alignment: .leading, spacing: AppSpacing.s2) {
-                            Label("识别结果", systemImage: "text.viewfinder")
+                            Label("AI 识别详情", systemImage: "sparkles")
                                 .font(.subheadline).fontWeight(.semibold)
                                 .padding(.bottom, 2)
-                            RecognitionFieldRow(label: "名称",
+                            RecognitionFieldRow(label: "品名",
                                                value: result.recognizedName,
                                                fallback: "未识别")
                             Divider()
                             RecognitionFieldRow(label: "规格单位",
-                                               value: result.packagingUnit?.unitName,
-                                               fallback: result.recognizedName != nil ? "—" : "未识别")
+                                               value: result.displayUnitName,
+                                               fallback: "—")
+                            Divider()
+                            RecognitionFieldRow(label: "品类",
+                                               value: result.displayCategoryName,
+                                               fallback: "—")
+                            if let days = result.displayShelfLifeDays, days > 0 {
+                                Divider()
+                                RecognitionFieldRow(label: "标准保质期",
+                                                   value: "\(days) 天",
+                                                   fallback: "—")
+                            }
                             Divider()
                             RecognitionFieldRow(
                                 label: "生产日期",
@@ -197,7 +222,7 @@ struct AIRecognitionResultView: View {
                                         .foregroundColor(.success)
                                         .font(.title3)
                                 }
-                                if let unit = result.packagingUnit {
+                                if let unit = result.packagingUnit ?? sku.packagingUnits.first {
                                     HStack {
                                         Text("匹配规格")
                                             .font(.caption).foregroundColor(.secondary)
@@ -208,11 +233,11 @@ struct AIRecognitionResultView: View {
                                 }
                             } else {
                                 HStack(spacing: AppSpacing.s1) {
-                                    Image(systemName: "questionmark.circle.fill")
-                                        .foregroundColor(.warning)
+                                    Image(systemName: "sparkles")
+                                        .foregroundColor(.brand)
                                     Text(result.recognizedName != nil
-                                         ? "未在商品库中找到「\(result.recognizedName!)」"
-                                         : "商品库中无匹配记录")
+                                         ? "检测到新品「\(result.recognizedName!)」，可一键建库入库"
+                                         : "未在商品库中找到匹配记录")
                                         .font(.subheadline).foregroundColor(.secondary)
                                 }
                             }
@@ -229,33 +254,31 @@ struct AIRecognitionResultView: View {
                                 dismiss()
                             }
                         } else {
-                            // 未命中或低置信度：主操作区
+                            // 未命中（新品）或低置信度：主操作区
                             VStack(spacing: AppSpacing.s2) {
-                                let targetName = inputName.trimmingCharacters(in: .whitespacesAndNewlines)
-                                let validName = targetName.isEmpty ? (result.recognizedName ?? "未命名新商品") : targetName
-                                
+                                let draft = currentDraft
                                 Button {
-                                    onQuickAdd(validName)
+                                    onQuickAdd(draft)
                                     dismiss()
                                 } label: {
                                     HStack {
                                         Image(systemName: "bolt.fill")
-                                        Text("⚡️ 一键快捷建库并选定「\(validName)」")
+                                        Text("⚡️ 一键快捷登记新品「\(draft.skuName)」并填表")
                                             .fontWeight(.semibold)
                                     }
                                     .frame(maxWidth: .infinity, minHeight: 48)
-                                    .background(Color.accentColor)
+                                    .background(Color.brand)
                                     .foregroundColor(.white)
                                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 }
 
                                 Button {
-                                    onLearn()
+                                    onLearn(draft)
                                     dismiss()
                                 } label: {
                                     HStack {
                                         Image(systemName: "square.and.pencil")
-                                        Text("详细配置并登记到商品库...")
+                                        Text("AI 自动预填并登记到商品库...")
                                     }
                                     .frame(maxWidth: .infinity, minHeight: 44)
                                     .background(Color.surface)
