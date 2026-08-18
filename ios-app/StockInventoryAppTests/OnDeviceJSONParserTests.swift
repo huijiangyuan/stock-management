@@ -1,6 +1,7 @@
 import XCTest
 @testable import StockInventoryApp
 
+@MainActor
 final class OnDeviceJSONParserTests: XCTestCase {
 
     func testParseStandardJSON() {

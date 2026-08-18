@@ -250,7 +250,7 @@ final class OnDeviceVisionEngine: ObservableObject {
     // MARK: - 判定与解析
 
     /// 判定输出文本中是否已生成完整的闭合 JSON 结构（用于提前早停）
-    static func isCompleteJSON(_ text: String) -> Bool {
+    nonisolated static func isCompleteJSON(_ text: String) -> Bool {
         guard let start = text.range(of: "{"),
               let end = text.range(of: "}", options: .backwards),
               start.lowerBound < end.upperBound else {
@@ -268,7 +268,7 @@ final class OnDeviceVisionEngine: ObservableObject {
     }
 
     /// 从模型输出里容错提取 JSON 并映射到 RecognitionResult。
-    static func parseResult(_ text: String, imageData: Data) -> RecognitionResult {
+    nonisolated static func parseResult(_ text: String, imageData: Data) -> RecognitionResult {
         let cleaned = cleanOutput(text)
 
         // 1. 尝试直接解析标准 JSON
@@ -298,7 +298,7 @@ final class OnDeviceVisionEngine: ObservableObject {
 
     // MARK: - 容错解析内部函数
 
-    private static func cleanOutput(_ text: String) -> String {
+    nonisolated private static func cleanOutput(_ text: String) -> String {
         var str = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // 剥离 Markdown 代码块 ```json ... ```
         if str.hasPrefix("```json") {
@@ -312,7 +312,7 @@ final class OnDeviceVisionEngine: ObservableObject {
         return str.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func extractJSONDictionary(from text: String) -> [String: Any]? {
+    nonisolated private static func extractJSONDictionary(from text: String) -> [String: Any]? {
         guard let start = text.range(of: "{"),
               let end = text.range(of: "}", options: .backwards),
               start.lowerBound < end.upperBound else {
@@ -326,7 +326,7 @@ final class OnDeviceVisionEngine: ObservableObject {
         return dict
     }
 
-    private static func tryRepairAndExtractJSON(from text: String) -> [String: Any]? {
+    nonisolated private static func tryRepairAndExtractJSON(from text: String) -> [String: Any]? {
         guard let start = text.range(of: "{") else { return nil }
         var candidate = String(text[start.lowerBound...])
 
@@ -346,7 +346,7 @@ final class OnDeviceVisionEngine: ObservableObject {
         return dict
     }
 
-    private static func extractByRegex(from text: String) -> [String: Any]? {
+    nonisolated private static func extractByRegex(from text: String) -> [String: Any]? {
         var dict: [String: Any] = [:]
 
         let extractValue = { (pattern: String) -> String? in
@@ -388,7 +388,7 @@ final class OnDeviceVisionEngine: ObservableObject {
         return dict.isEmpty ? nil : dict
     }
 
-    private static func buildResult(from dict: [String: Any], rawText: String) -> RecognitionResult {
+    nonisolated private static func buildResult(from dict: [String: Any], rawText: String) -> RecognitionResult {
         let str = { (keys: [String]) -> String? in
             for k in keys {
                 if let v = dict[k] {
@@ -458,7 +458,7 @@ final class OnDeviceVisionEngine: ObservableObject {
         }
     }
 
-    private static func parseDate(_ s: String) -> Date? {
+    nonisolated private static func parseDate(_ s: String) -> Date? {
         let fmts = ["yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd"]
         let df = DateFormatter()
         df.timeZone = TimeZone(identifier: "Asia/Shanghai")
