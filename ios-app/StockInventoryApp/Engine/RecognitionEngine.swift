@@ -92,6 +92,7 @@ struct SKUPrefillDraft: Sendable {
 
 enum VisionRecognitionSource: String, Sendable {
     case vector = "本地图片向量"
+    case ocr = "端侧极速识字"
     case miniCPM = "端侧 MiniCPM-V"
     case cloud = "云端 VLM"
     case unavailable = "未识别"
