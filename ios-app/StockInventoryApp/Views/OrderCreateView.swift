@@ -197,7 +197,11 @@ struct OrderCreateView: View {
 
                     Section(orderType == "INBOUND" ? "入库批次信息" : "批次与出库建议") {
                         if orderType == "INBOUND" {
-                            inboundBatchFields
+                            TextField("批次号（留空自动生成）", text: $batchNo)
+                            DatePicker("生产日期", selection: $productionDate, displayedComponents: .date)
+                            DatePicker("到期日期", selection: $expirationDate, displayedComponents: .date)
+                            TextField("供应商", text: $supplier)
+                            TextField("入库单价", text: $inboundPrice).keyboardType(.decimalPad)
                         } else {
                             batchSection
                         }
