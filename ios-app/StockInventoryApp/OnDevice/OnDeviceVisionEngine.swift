@@ -359,28 +359,28 @@ final class OnDeviceVisionEngine: ObservableObject {
             return nsString.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        if let name = extractValue("\"(?:名称|name|sku_name|商品名称|品名)\"\\s*:\\s*\"([^\"]+)\"") {
+        if let name = extractValue("[\"“”]?(?:名称|name|sku_name|商品名称|品名)[\"“”]?\\s*(?::|：)\\s*[\"“”]?([^\",，\n“”]+)[\"“”]?") {
             dict["名称"] = name
         }
-        if let unit = extractValue("\"(?:规格单位|单位|unit|unit_name|包装单位)\"\\s*:\\s*\"([^\"]+)\"") {
+        if let unit = extractValue("[\"“”]?(?:规格单位|单位|unit|unit_name|包装单位)[\"“”]?\\s*(?::|：)\\s*[\"“”]?([^\",，\n“”]+)[\"“”]?") {
             dict["规格单位"] = unit
         }
-        if let cat = extractValue("\"(?:品类|category|category_name|分类)\"\\s*:\\s*\"([^\"]+)\"") {
+        if let cat = extractValue("[\"“”]?(?:品类|category|category_name|分类)[\"“”]?\\s*(?::|：)\\s*[\"“”]?([^\",，\n“”]+)[\"“”]?") {
             dict["品类"] = cat
         }
-        if let daysStr = extractValue("\"(?:保质期天数|保质期天|shelf_life_days|shelf_life)\"\\s*:\\s*([0-9]+)") {
+        if let daysStr = extractValue("[\"“”]?(?:保质期天数|保质期天|shelf_life_days|shelf_life)[\"“”]?\\s*(?::|：)\\s*[\"“”]?([0-9]+)[\"“”]?") {
             dict["保质期天数"] = Int(daysStr)
         }
-        if let code = extractValue("\"(?:条码|barcode|条形码)\"\\s*:\\s*\"([^\"]+)\"") {
+        if let code = extractValue("[\"“”]?(?:条码|barcode|条形码)[\"“”]?\\s*(?::|：)\\s*[\"“”]?([A-Za-z0-9_-]+)[\"“”]?") {
             dict["条码"] = code
         }
-        if let prod = extractValue("\"(?:生产日期|prod_date|production_date)\"\\s*:\\s*\"([^\"]+)\"") {
+        if let prod = extractValue("[\"“”]?(?:生产日期|prod_date|production_date)[\"“”]?\\s*(?::|：)\\s*[\"“”]?([0-9]{4}[-/.][0-9]{1,2}[-/.][0-9]{1,2})[\"“”]?") {
             dict["生产日期"] = prod
         }
-        if let exp = extractValue("\"(?:保质期|到期日期|exp_date|expiration_date)\"\\s*:\\s*\"([^\"]+)\"") {
+        if let exp = extractValue("[\"“”]?(?:保质期|到期日期|exp_date|expiration_date)[\"“”]?\\s*(?::|：)\\s*[\"“”]?([0-9]{4}[-/.][0-9]{1,2}[-/.][0-9]{1,2})[\"“”]?") {
             dict["保质期"] = exp
         }
-        if let confStr = extractValue("\"(?:置信度|confidence)\"\\s*:\\s*([0-9.]+)"),
+        if let confStr = extractValue("[\"“”]?(?:置信度|confidence)[\"“”]?\\s*(?::|：)\\s*[\"“”]?([0-9.]+)[\"“”]?"),
            let conf = Double(confStr) {
             dict["置信度"] = conf
         }
