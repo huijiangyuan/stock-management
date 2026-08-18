@@ -68,7 +68,6 @@ struct SemanticCorrectionEngine {
             if result.count == known.count && result.count >= 3 {
                 let dist = levenshteinDistance(result, known)
                 if dist == 1 {
-                    // 仅差一个字符且长度达到阈值，自动纠偏
                     return known
                 }
             }
@@ -84,21 +83,21 @@ struct SemanticCorrectionEngine {
         let clean = text.lowercased().replacingOccurrences(of: " ", with: "")
         guard !clean.isEmpty else { return nil }
 
-        // 核心分类关键词规则库
+        // 核心分类关键词规则库（支持词根及细分词素）
         let categoryRules: [(category: String, keywords: [String])] = [
             ("食品餐饮", [
-                "德克士", "肯德基", "麦当劳", "汉堡", "炸鸡", "鸡块", "薯条", "咖啡", "奶茶", "可乐",
-                "牛奶", "果汁", "饮料", "面包", "饼干", "蛋糕", "燕麦", "零食", "牛肉", "鸡肉",
-                "猪肉", "海鲜", "蔬菜", "水果", "调味", "酱油", "食用油", "大米", "面粉", "方便面",
-                "罐头", "糖果", "巧克力", "茶叶", "饮用水", "冰淇淋", "餐饮"
+                "德克士", "肯德基", "麦当劳", "汉堡", "炸鸡", "鸡腿", "鸡块", "薯条", "堡", "咖啡",
+                "奶茶", "可乐", "牛奶", "果汁", "饮料", "面包", "饼干", "蛋糕", "燕麦", "零食",
+                "牛肉", "鸡肉", "猪肉", "海鲜", "蔬菜", "水果", "调味", "酱油", "食用油", "大米",
+                "面粉", "方便面", "罐头", "糖果", "巧克力", "茶叶", "饮用水", "冰淇淋", "餐饮", "食品", "快餐"
             ]),
             ("五金配件", [
                 "螺栓", "螺丝", "螺母", "螺钉", "垫圈", "垫片", "轴承", "弹簧", "销轴", "卡簧",
                 "铆钉", "锁具", "合页", "滑轨", "把手", "五金", "紧固件", "索具", "夹具"
             ]),
             ("金属材料", [
-                "铜管", "铜排", "钢管", "不锈钢", "铝合金", "型材", "板材", "圆钢", "方管",
-                "镀锌", "冷轧", "热轧", "碳钢", "角钢", "槽钢", "工字钢", "钢丝", "金属"
+                "铜管", "铜排", "紫铜", "黄铜", "钢管", "不锈钢", "铝合金", "型材", "板材", "圆钢",
+                "方管", "镀锌", "冷轧", "热轧", "碳钢", "角钢", "槽钢", "工字钢", "钢丝", "金属", "钢板"
             ]),
             ("机械传动", [
                 "齿轮", "皮带", "同步带", "链条", "链轮", "联轴器", "减速机", "电机", "马达",
@@ -109,8 +108,8 @@ struct SemanticCorrectionEngine {
                 "木箱", "塑料袋", "封口胶", "耗材", "包装"
             ]),
             ("化工辅料", [
-                "润滑油", "润滑脂", "机油", "黄油", "清洗剂", "脱脂剂", "防锈剂", "机油", "密封胶",
-                "树脂", "胶水", "涂料", "油漆", "固化剂", "溶剂", "稀释剂", "化工"
+                "润滑", "机油", "黄油", "清洗剂", "脱脂剂", "防锈", "密封胶", "树脂", "胶水",
+                "涂料", "油漆", "固化剂", "溶剂", "稀释剂", "化工", "硅脂"
             ]),
             ("电子元器件", [
                 "芯片", "电阻", "电容", "二极管", "三极管", "电感", "晶振", "继电器", "传感器",
@@ -126,13 +125,23 @@ struct SemanticCorrectionEngine {
             ])
         ]
 
-        // 1. 优先匹配既有库中用户已有品类
+        // 1. 优先匹配已有库中用户自定义分类
         for existing in existingCategories {
             let cleanExisting = existing.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleanExisting.isEmpty else { continue }
-            for rule in categoryRules where rule.category == cleanExisting || cleanExisting.contains(rule.category) {
-                if rule.keywords.contains(where: { clean.contains($0.lowercased()) }) {
-                    return cleanExisting
+
+            // 如果现有分类名称与待识别文本有交集（如现有分类“西式快餐”，识别到“德克士炸鸡快餐”）
+            if clean.contains(cleanExisting.lowercased()) || cleanExisting.lowercased().contains(clean) {
+                return cleanExisting
+            }
+
+            for rule in categoryRules {
+                // 如果现有分类命中了规则库中的任一分类语义
+                let matchedRuleCategory = rule.category == cleanExisting || cleanExisting.contains(rule.category) || rule.keywords.contains(where: { cleanExisting.lowercased().contains($0) })
+                if matchedRuleCategory {
+                    if rule.keywords.contains(where: { clean.contains($0.lowercased()) }) {
+                        return cleanExisting
+                    }
                 }
             }
         }
@@ -158,7 +167,7 @@ struct SemanticCorrectionEngine {
         if clean.contains("板") || clean.contains("片") {
             return "张"
         }
-        if clean.contains("油") || clean.contains("水") || clean.contains("饮料") || clean.contains("奶") || clean.contains("剂") {
+        if clean.contains("油") || clean.contains("水") || clean.contains("饮料") || clean.contains("奶") || clean.contains("剂") || clean.contains("脂") {
             if clean.contains("桶") || clean.contains("脂") || clean.contains("润滑") { return "桶" }
             if clean.contains("罐") { return "罐" }
             return "瓶"
@@ -175,7 +184,7 @@ struct SemanticCorrectionEngine {
         if clean.contains("螺") || clean.contains("轴承") || clean.contains("垫") || clean.contains("销") || clean.contains("阀") || clean.contains("芯片") || clean.contains("电机") {
             return "个"
         }
-        if clean.contains("汉堡") || clean.contains("炸鸡") || clean.contains("套餐") || clean.contains("德克士") {
+        if clean.contains("汉堡") || clean.contains("炸鸡") || clean.contains("套餐") || clean.contains("德克士") || clean.contains("堡") {
             return "份"
         }
         return "个"
@@ -185,7 +194,6 @@ struct SemanticCorrectionEngine {
 
     /// 依据品类或文本中包含的保质期描述自动换算天数
     static func inferShelfLifeDays(from text: String) -> Int? {
-        // 正则提取 "保质期XX天/月/年"
         let pattern = "(?:保质期|保存期|EXP)?\\s*([0-9]+)\\s*(天|日|个月|月|年)"
         if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
             let nsString = text as NSString

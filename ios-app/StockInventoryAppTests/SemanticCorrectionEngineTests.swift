@@ -52,7 +52,8 @@ final class SemanticCorrectionEngineTests: XCTestCase {
         XCTAssertEqual(SemanticCorrectionEngine.inferBaseUnit(from: "高纯度铜管"), "根")
         XCTAssertEqual(SemanticCorrectionEngine.inferBaseUnit(from: "德克士汉堡套餐"), "份")
         XCTAssertEqual(SemanticCorrectionEngine.inferBaseUnit(from: "冷轧钢板"), "张")
-        XCTAssertEqual(SemanticCorrectionEngine.inferBaseUnit(from: "润滑油"), "瓶")
+        XCTAssertEqual(SemanticCorrectionEngine.inferBaseUnit(from: "工业润滑油"), "桶")
+        XCTAssertEqual(SemanticCorrectionEngine.inferBaseUnit(from: "矿泉水饮料"), "瓶")
 
         XCTAssertEqual(SemanticCorrectionEngine.inferShelfLifeDays(from: "常温保质期12个月"), 360)
         XCTAssertEqual(SemanticCorrectionEngine.inferShelfLifeDays(from: "保质期 180天"), 180)
