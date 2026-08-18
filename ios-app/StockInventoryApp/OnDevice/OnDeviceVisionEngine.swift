@@ -256,7 +256,7 @@ final class OnDeviceVisionEngine: ObservableObject {
               start.lowerBound < end.upperBound else {
             return false
         }
-        let candidate = String(text[start.lowerBound...end.upperBound])
+        let candidate = String(text[start.lowerBound..<end.upperBound])
         guard let data = candidate.data(using: .utf8),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return false
@@ -318,7 +318,7 @@ final class OnDeviceVisionEngine: ObservableObject {
               start.lowerBound < end.upperBound else {
             return nil
         }
-        let jsonSub = text[start.lowerBound...end.upperBound]
+        let jsonSub = text[start.lowerBound..<end.upperBound]
         guard let data = jsonSub.data(using: .utf8),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
