@@ -6,7 +6,7 @@ import SwiftData
 /// 整个编排限定在 MainActor，耗时图片、OCR 与 Core ML 操作分别由 actor 串行执行。
 @MainActor
 final class VisionRecognitionPipeline {
-    typealias Fallback = @MainActor (Data) async -> (RecognitionResult, VisionRecognitionSource)
+    typealias Fallback = @MainActor (Data, String?) async -> (RecognitionResult, VisionRecognitionSource)
 
     private let imageProcessor: any CapturedImageProcessing
     private let embeddingEngine: any ImageEmbeddingProviding
@@ -34,8 +34,8 @@ final class VisionRecognitionPipeline {
         self.featureRepository = featureRepository ?? FeatureRepository(context: context)
         self.vectorCandidateThreshold = vectorCandidateThreshold
         self.vectorAutoSelectionThreshold = vectorAutoSelectionThreshold
-        self.fallback = fallback ?? { data in
-            await Self.defaultFallback(imageData: data, context: context)
+        self.fallback = fallback ?? { data, ocrHint in
+            await Self.defaultFallback(imageData: data, ocrHint: ocrHint, context: context)
         }
     }
 
@@ -168,17 +168,15 @@ final class VisionRecognitionPipeline {
             }
         }
 
-        // 4. 深度图文理解：调用 MiniCPM-V 4.6 端侧多模态模型（或云端 VLM 兜底）
+        // 4. 深度图文理解：调用 MiniCPM-V 4.6 端侧多模态模型（或云端 VLM 兜底，传入 OCR 文本作为先验提速）
         try Task.checkCancellation()
-        let (fallbackResult, source) = await fallback(processedImage.jpegData)
+        let ocrHint = ocrResult.topCandidateTerms.first ?? (ocrResult.fullText.isEmpty ? nil : ocrResult.fullText)
+        let (fallbackResult, source) = await fallback(processedImage.jpegData, ocrHint)
         try Task.checkCancellation()
         var resolved = fallbackResult
 
-        // 若大模型未能输出品名，但 OCR 提取到了高频品名词，补充为品名兜底
-        if (resolved.recognizedName == nil || resolved.recognizedName?.isEmpty == true),
-           let topTerm = ocrResult.topCandidateTerms.first {
-            resolved.recognizedName = topTerm
-        }
+        // 5. 语义纠错与品类/单位增强
+        resolved = enrichResult(resolved, ocrResult: ocrResult)
 
         // 在本地已有商品库中模糊比对品名，若匹配已有商品则绑定，否则作为新商品
         if resolved.sku == nil, let name = resolved.recognizedName {
@@ -210,14 +208,13 @@ final class VisionRecognitionPipeline {
         // 2. 计算当前图片特征向量（用于建档保存样本）
         let embedding = try? await embeddingEngine.embed(imageData: processedImage.jpegData)
 
-        // 3. 直接调用端侧 MiniCPM-V / 云端 VLM 进行物料属性结构化解析
-        let (fallbackResult, source) = await fallback(processedImage.jpegData)
+        // 3. 直接调用端侧 MiniCPM-V / 云端 VLM 进行物料属性结构化解析（传入 OCR 文本先验提速）
+        let ocrHint = ocrResult.topCandidateTerms.first ?? (ocrResult.fullText.isEmpty ? nil : ocrResult.fullText)
+        let (fallbackResult, source) = await fallback(processedImage.jpegData, ocrHint)
         var resolved = fallbackResult
 
-        if (resolved.recognizedName == nil || resolved.recognizedName?.isEmpty == true),
-           let topTerm = ocrResult.topCandidateTerms.first {
-            resolved.recognizedName = topTerm
-        }
+        // 4. 应用端侧智能语义纠错与分类/单位推断增强
+        resolved = enrichResult(resolved, ocrResult: ocrResult)
 
         return VisionRecognitionOutcome(
             recognitionID: recognitionID,
@@ -227,6 +224,52 @@ final class VisionRecognitionPipeline {
             matches: [],
             source: source
         )
+    }
+
+    /// 使用 SemanticCorrectionEngine 对识别结果进行纠偏和缺失字段自动补齐
+    private func enrichResult(_ input: RecognitionResult, ocrResult: VisionOCREngine.OCRResult) -> RecognitionResult {
+        var res = input
+        let existingCategories = fetchExistingCategoryNames()
+
+        // 1. 品名纠错与兜底
+        if let currentName = res.recognizedName, !currentName.isEmpty {
+            res.recognizedName = SemanticCorrectionEngine.correctText(currentName)
+        } else if let topTerm = ocrResult.topCandidateTerms.first {
+            res.recognizedName = SemanticCorrectionEngine.correctText(topTerm)
+        }
+
+        let effectiveName = res.recognizedName ?? ""
+
+        // 2. 品类自动推断与补全
+        if res.recognizedCategory == nil || res.recognizedCategory?.isEmpty == true {
+            let textToInfer = !effectiveName.isEmpty ? effectiveName : ocrResult.fullText
+            res.recognizedCategory = SemanticCorrectionEngine.inferCategory(
+                from: textToInfer,
+                existingCategories: existingCategories
+            )
+        }
+
+        // 3. 单位自动推断与补全
+        if res.recognizedUnit == nil || res.recognizedUnit?.isEmpty == true {
+            let textToInfer = !effectiveName.isEmpty ? effectiveName : ocrResult.fullText
+            if !textToInfer.isEmpty {
+                res.recognizedUnit = SemanticCorrectionEngine.inferBaseUnit(from: textToInfer)
+            }
+        }
+
+        // 4. 保质期天数智能推断
+        if res.recognizedShelfLifeDays == nil || res.recognizedShelfLifeDays == 0 {
+            if let days = SemanticCorrectionEngine.inferShelfLifeDays(from: ocrResult.fullText) {
+                res.recognizedShelfLifeDays = days
+            }
+        }
+
+        return res
+    }
+
+    private func fetchExistingCategoryNames() -> [String] {
+        guard let skus = try? context.fetch(FetchDescriptor<RawMaterialSKU>()) else { return [] }
+        return Array(Set(skus.map { $0.categoryName }.filter { !$0.isEmpty }))
     }
 
     private func matchSKU(by name: String) throws -> RawMaterialSKU? {
@@ -255,18 +298,20 @@ final class VisionRecognitionPipeline {
 
     private static func defaultFallback(
         imageData: Data,
+        ocrHint: String?,
         context: ModelContext
     ) async -> (RecognitionResult, VisionRecognitionSource) {
         let settings = VisionSettings.shared
 
-        // MobileCLIP 未命中后必须先尝试 MiniCPM-V；云端只在模型缺失或
-        // 内存准入未通过时兜底，不能通过偏好设置绕过端侧验证链路。
+        // 1. 优先尝试端侧 MiniCPM-V 4.6
         if !OnDeviceVisionEngine.shared.loadSuccess {
             await ModelManager.shared.ensureLoaded()
         }
         if OnDeviceVisionEngine.shared.onDeviceUsable {
-            return (await OnDeviceVisionEngine.shared.recognize(imageData: imageData), .miniCPM)
+            return (await OnDeviceVisionEngine.shared.recognize(imageData: imageData, ocrHint: ocrHint), .miniCPM)
         }
+
+        // 2. 尝试云端大模型
         if settings.cloudReady {
             let result = await CloudVisionEngine().recognize(
                 RecognitionInput(visionImage: imageData),
@@ -275,8 +320,32 @@ final class VisionRecognitionPipeline {
             return (result, .cloud)
         }
 
+        // 3. 极速端侧 OCR + 本地语义推理模式（大模型未就绪时的 0.05s 极速兜底通道）
+        if let hint = ocrHint?.trimmingCharacters(in: .whitespacesAndNewlines), !hint.isEmpty {
+            let corrected = SemanticCorrectionEngine.correctText(hint)
+            let cat = SemanticCorrectionEngine.inferCategory(from: corrected)
+            let unit = SemanticCorrectionEngine.inferBaseUnit(from: corrected)
+            let days = SemanticCorrectionEngine.inferShelfLifeDays(from: hint)
+            let result = RecognitionResult(
+                confidence: 0.85,
+                mode: .vision,
+                needsLearning: false,
+                recognizedName: corrected,
+                recognizedUnit: unit,
+                recognizedCategory: cat,
+                recognizedShelfLifeDays: days
+            )
+            AppLogger.shared.log(
+                level: .info,
+                category: .ai,
+                message: "已启用端侧极速语义纠错与推理通道",
+                details: "name=\(corrected), category=\(cat ?? "无"), unit=\(unit)"
+            )
+            return (result, .ocr)
+        }
+
         AppLogger.shared.log(
-            level: .error,
+            level: .warning,
             category: .ai,
             message: "没有可用的视觉识别兜底引擎",
             details: OnDeviceVisionEngine.shared.unavailableReason

@@ -205,8 +205,8 @@ gh workflow run build-ios-ipa.yml \
 
 - Actions job 结论为 `success`，且上述步骤不得有被跳过的必需项。
 - 必须查到 artifact / Release 资产名、大小、ID/URL。
-- 可下载时应实际下载 IPA，执行 `unzip -tq` 并记录 SHA-256。仅 Release API 显示 `uploaded` 不等于本机下载验证通过。
-- 报告时必须写明：构建 commit、分支、run ID、结论、下载方式、SHA-256 和真机未覆盖项。
+- 可下载时应实际下载 IPA 到系统默认下载目录（`~/Downloads/StockManager-<short_sha>.ipa`），执行 `unzip -tq` 并记录 SHA-256。仅 Release API 显示 `uploaded` 不等于本机下载验证通过。
+- 报告时必须写明：构建 commit、分支、run ID、结论、本地下载路径（`~/Downloads/`）、SHA-256 和真机未覆盖项。
 
 ### 7.4 公开 Release 链接
 

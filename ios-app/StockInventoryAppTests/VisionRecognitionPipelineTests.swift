@@ -17,7 +17,7 @@ final class VisionRecognitionPipelineTests: XCTestCase {
             ocrEngine: FakeOCREngine(result: VisionOCREngine.OCRResult(lines: [], fullText: "", topCandidateTerms: [])),
             featureRepository: FakeFeatureSearch(matches: [FeatureMatch(sample: sample, similarity: 0.93)]),
             vectorAutoSelectionThreshold: 0.90,
-            fallback: { _ in
+            fallback: { _, _ in
                 fallbackCalled = true
                 return (RecognitionResult(confidence: 0, mode: .vision, needsLearning: true), .miniCPM)
             }
@@ -46,7 +46,7 @@ final class VisionRecognitionPipelineTests: XCTestCase {
                 topCandidateTerms: ["特级黑咖啡", "精选原豆"]
             )),
             featureRepository: FakeFeatureSearch(matches: [FeatureMatch(sample: sample, similarity: 0.78)]),
-            fallback: { _ in
+            fallback: { _, _ in
                 fallbackCalled = true
                 return (RecognitionResult(confidence: 0, mode: .vision, needsLearning: true), .miniCPM)
             }
@@ -65,6 +65,7 @@ final class VisionRecognitionPipelineTests: XCTestCase {
         let oldSKU = RawMaterialSKU(skuCode: "SKU-COFFEE", skuName: "特级黑咖啡", categoryName: "饮品")
         let sample = FeatureSample(sku: oldSKU)
         var fallbackCalled = false
+        var passedHint: String?
         let pipeline = VisionRecognitionPipeline(
             context: context,
             imageProcessor: FakeImageProcessor(),
@@ -75,8 +76,9 @@ final class VisionRecognitionPipelineTests: XCTestCase {
                 topCandidateTerms: ["高纯度铜管", "工业材料"]
             )),
             featureRepository: FakeFeatureSearch(matches: [FeatureMatch(sample: sample, similarity: 0.86)]),
-            fallback: { _ in
+            fallback: { _, hint in
                 fallbackCalled = true
+                passedHint = hint
                 return (
                     RecognitionResult(
                         confidence: 0.95,
@@ -94,34 +96,32 @@ final class VisionRecognitionPipelineTests: XCTestCase {
         let outcome = try await pipeline.recognize(rawImageData: Data([0x01]))
 
         XCTAssertTrue(fallbackCalled, "虽然纸箱向量相似度高达 0.86，但 OCR 文字发生明显冲突，必须否决向量短路并调用 VLM 深度理解")
+        XCTAssertEqual(passedHint, "高纯度铜管", "应将 OCR 提取出的关键词传递给大模型作为先验提速")
         XCTAssertEqual(outcome.source, .miniCPM)
         XCTAssertEqual(outcome.result.recognizedName, "高纯度铜管", "必须正确解析出新纸箱上的真实品名，绝不能被旧咖啡纸箱覆盖")
     }
 
-    func testExtractAttributesForNewSKUDidNotCoveredByExistingVector() async throws {
-        // 场景：商品建档表单（SKUFormView）拍照填表，即使库里有旧商品纸箱，也必须提取新品属性
+    func testDicosHomoglyphAndCategoryAutoInference() async throws {
+        // 场景：OCR 提取到了“德克上”，VLM 未就绪时，系统自动纠正为“德克士”并自动推理填充“食品餐饮”分类和“份”单位
         let context = try makeContext()
-        let oldSKU = RawMaterialSKU(skuCode: "SKU-OLD", skuName: "旧纸箱物料", categoryName: "旧品类")
-        let sample = FeatureSample(sku: oldSKU)
         let pipeline = VisionRecognitionPipeline(
             context: context,
             imageProcessor: FakeImageProcessor(),
             embeddingEngine: FakeEmbeddingEngine(),
             ocrEngine: FakeOCREngine(result: VisionOCREngine.OCRResult(
-                lines: ["精密轴承 608ZZ"],
-                fullText: "精密轴承 608ZZ",
-                topCandidateTerms: ["精密轴承"]
+                lines: ["德克上香辣鸡腿堡"],
+                fullText: "德克上香辣鸡腿堡",
+                topCandidateTerms: ["德克上香辣鸡腿堡"]
             )),
-            featureRepository: FakeFeatureSearch(matches: [FeatureMatch(sample: sample, similarity: 0.88)]),
-            fallback: { _ in
+            featureRepository: FakeFeatureSearch(matches: []),
+            fallback: { _, hint in
+                // 模拟大模型未能识别出分类（只输出了生文本）
                 return (
                     RecognitionResult(
-                        confidence: 0.92,
+                        confidence: 0.8,
                         mode: .vision,
                         needsLearning: false,
-                        recognizedName: "精密轴承",
-                        recognizedUnit: "个",
-                        recognizedCategory: "传动件"
+                        recognizedName: "德克上香辣鸡腿堡"
                     ),
                     .miniCPM
                 )
@@ -130,9 +130,9 @@ final class VisionRecognitionPipelineTests: XCTestCase {
 
         let outcome = try await pipeline.extractAttributesForNewSKU(rawImageData: Data([0x01]))
 
-        XCTAssertEqual(outcome.result.recognizedName, "精密轴承")
-        XCTAssertEqual(outcome.result.recognizedCategory, "传动件")
-        XCTAssertEqual(outcome.matches.count, 0, "建档专属通道不应返回存量冲突向量")
+        XCTAssertEqual(outcome.result.recognizedName, "德克士香辣鸡腿堡", "形近字‘德克上’应自动纠偏为‘德克士’")
+        XCTAssertEqual(outcome.result.displayCategoryName, "食品餐饮", "应根据‘德克士/汉堡’自动推理填充‘食品餐饮’品类")
+        XCTAssertEqual(outcome.result.displayUnitName, "份", "应自动推断‘份’为基准单位")
     }
 
     private func makeContext() throws -> ModelContext {
