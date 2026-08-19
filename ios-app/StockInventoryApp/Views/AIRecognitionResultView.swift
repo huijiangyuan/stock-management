@@ -44,12 +44,15 @@ struct AIRecognitionResultView: View {
     private var currentDraft: SKUPrefillDraft {
         let targetName = inputName.trimmingCharacters(in: .whitespacesAndNewlines)
         let validName = targetName.isEmpty ? (result.recognizedName ?? "新商品物料") : targetName
+        let cleanPkgUnit = result.recognizedPackagingSpec?.components(separatedBy: "(").first
         return SKUPrefillDraft(
             skuName: validName,
             categoryName: result.displayCategoryName ?? "默认品类",
             baseUnit: result.displayUnitName ?? "个",
             shelfLifeDays: result.displayShelfLifeDays ?? 0,
             barcode: result.recognizedBarcode,
+            packagingUnitName: cleanPkgUnit,
+            conversionRatio: result.recognizedConversionRatio,
             productionDate: result.productionDate,
             expirationDate: result.expirationDate,
             visionOutcome: outcome
@@ -135,6 +138,12 @@ struct AIRecognitionResultView: View {
                             RecognitionFieldRow(label: "规格单位",
                                                value: result.displayUnitName,
                                                fallback: "—")
+                            if let pkgSpec = result.recognizedPackagingSpec {
+                                Divider()
+                                RecognitionFieldRow(label: "包装规格",
+                                                   value: pkgSpec,
+                                                   fallback: "—")
+                            }
                             Divider()
                             RecognitionFieldRow(label: "品类",
                                                value: result.displayCategoryName,

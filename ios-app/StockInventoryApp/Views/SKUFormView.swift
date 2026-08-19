@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 import UIKit
 
-/// 新增 / 编辑 SKU，并维护其多级包装规格。学习模式（扫到未知条码/AI 识别新品）也走此表单。
+/// 新增 / 编辑 SKU，并维护其多级包装规格。支持通过 AI 拍照智能提取预填。
 struct SKUFormView: View {
     @Environment(\.modelContext) private var ctx
     @Environment(\.dismiss) private var dismiss
@@ -34,13 +34,7 @@ struct SKUFormView: View {
 
     enum FormSheet: Identifiable {
         case camera
-        case scanner
-        var id: String {
-            switch self {
-            case .camera: return "camera"
-            case .scanner: return "scanner"
-            }
-        }
+        var id: String { "camera" }
     }
 
     @State private var activeSheet: FormSheet? = nil
@@ -58,90 +52,141 @@ struct SKUFormView: View {
                     Section {
                         VStack(spacing: 10) {
                             HStack {
-                                Label("AI 拍照 / 扫码智能填表", systemImage: "sparkles")
+                                Label("AI 拍照智能分析填表", systemImage: "sparkles")
                                     .font(.subheadline)
                                     .fontWeight(.bold)
                                     .foregroundColor(.brand)
                                 Spacer()
                             }
-                            
-                            HStack(spacing: 12) {
-                                Button {
-                                    handleCameraTap()
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "camera.viewfinder")
-                                        Text("📷 拍照 AI 填表")
-                                            .fontWeight(.semibold)
-                                    }
-                                    .frame(maxWidth: .infinity, minHeight: 42)
-                                    .background(Color.brand)
-                                    .foregroundColor(.white)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                }
-                                .buttonStyle(.plain)
 
-                                Button {
-                                    activeSheet = .scanner
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "barcode.viewfinder")
-                                        Text("扫码录入")
-                                    }
-                                    .frame(maxWidth: .infinity, minHeight: 42)
-                                    .background(Color.surface)
-                                    .foregroundColor(.primary)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            Button {
+                                handleCameraTap()
+                            } label: {
+                                HStack {
+                                    Image(systemName: "camera.viewfinder")
+                                    Text("📷 拍照 AI 智能提取属性")
+                                        .fontWeight(.semibold)
                                 }
-                                .buttonStyle(.plain)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .background(Color.brand)
+                                .foregroundColor(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             }
-                            
+                            .buttonStyle(.plain)
+
                             // ── 端侧 AI 模型自动加载中动态动画提示 Banner ────
                             ModelAutoLoadingBannerView()
-                            
+
                             if let msg = aiBannerMsg, showAiBanner {
                                 Text(msg)
                                     .font(.caption)
                                     .foregroundColor(msg.contains("成功") || msg.contains("就绪") ? .green : .orange)
                                     .multilineTextAlignment(.leading)
                                     .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.vertical, 2)
                             }
                         }
                         .padding(.vertical, 4)
                     }
 
-                    Section("基础信息") {
-                        TextField("商品编码（如 SKU-1001）", text: $skuCode)
-                        TextField("商品名称（如 蓝牙耳机 / 特级红酒 / 肥牛卷）", text: $skuName)
-                        TextField("品类（如 数码 / 饮料 / 肉类 / 配件）", text: $categoryName)
-                        TextField("基准单位（如 个/包/瓶）", text: $baseUnit)
-                        TextField("标准保质期（天）", text: $shelfLifeDays)
-                            .keyboardType(.numberPad)
-                    }
-                    Section("多级包装规格") {
-                        ForEach($units) { $u in
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    TextField("规格名（散包/中箱/大箱）", text: $u.unitName)
-                                    Picker("类型", selection: $u.unitType) {
-                                        Text("BASE").tag("BASE")
-                                        Text("MID").tag("MID")
-                                        Text("LARGE").tag("LARGE")
-                                        Text("PALLET").tag("PALLET")
-                                    }
-                                    .frame(width: 110)
+                    Section("商品基础档案") {
+                        LabeledFormField(label: "商品编码", isRequired: true) {
+                            HStack {
+                                TextField("输入编码", text: $skuCode)
+                                    .font(.body)
+                                Button {
+                                    skuCode = Self.generateRandomSKUCode()
+                                } label: {
+                                    Text("随机生成")
+                                        .font(.caption2)
+                                        .foregroundColor(.brand)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.brand.opacity(0.12))
+                                        .clipShape(Capsule())
                                 }
-                                HStack {
-                                    TextField("换算系数（×基准单位）", text: $u.conversionRatio)
-                                        .keyboardType(.decimalPad)
-                                    TextField("条码（可选）", text: $u.barcode)
-                                }
+                                .buttonStyle(.plain)
                             }
                         }
-                        .onDelete { units.remove(atOffsets: $0) }
-                        Button("添加规格") {
-                            units.append(PackagingUnitDraft(unitName: "", unitType: "BASE", conversionRatio: "1"))
+
+                        LabeledFormField(label: "商品名称", isRequired: true) {
+                            TextField("如：可口可乐 (330ml) / 特级肥牛卷 / 502胶水", text: $skuName)
+                                .font(.body)
                         }
+
+                        LabeledFormField(label: "所属品类") {
+                            TextField("如：食品餐饮 / 五金配件 / 金属材料 / 包装耗材", text: $categoryName)
+                                .font(.body)
+                        }
+
+                        LabeledFormField(label: "基准计量单位（最小记账单位）", isRequired: true) {
+                            TextField("如：瓶 / 包 / 盒 / 个 / kg / 支", text: $baseUnit)
+                                .font(.body)
+                        }
+
+                        LabeledFormField(label: "标准保质期（天数）") {
+                            HStack {
+                                TextField("0 表示长期有效", text: $shelfLifeDays)
+                                    .keyboardType(.numberPad)
+                                    .font(.body)
+                                Text("天")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    Section {
+                        ForEach($units) { $u in
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text("包装规格")
+                                        .font(.caption.bold())
+                                        .foregroundColor(.brand)
+                                    Spacer()
+                                    Picker("类型", selection: $u.unitType) {
+                                        Text("基础(BASE)").tag("BASE")
+                                        Text("中包(MID)").tag("MID")
+                                        Text("大箱(LARGE)").tag("LARGE")
+                                        Text("托盘(PALLET)").tag("PALLET")
+                                    }
+                                    .pickerStyle(.menu)
+                                }
+
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("规格名称")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                        TextField("如 散包/整箱", text: $u.unitName)
+                                            .textFieldStyle(.roundedBorder)
+                                    }
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("换算系数 (×\(baseUnit.isEmpty ? "基准单位" : baseUnit))")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                        TextField("系数", text: $u.conversionRatio)
+                                            .keyboardType(.decimalPad)
+                                            .textFieldStyle(.roundedBorder)
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .onDelete { units.remove(atOffsets: $0) }
+
+                        Button {
+                            units.append(PackagingUnitDraft(unitName: "", unitType: "LARGE", conversionRatio: "24"))
+                        } label: {
+                            Label("添加包装规格", systemImage: "plus.circle.fill")
+                                .foregroundColor(.brand)
+                        }
+                    } header: {
+                        Text("多级包装规格定义")
+                    } footer: {
+                        Text("出入库操作时可自由选择任意包装规格，系统将自动按换算系数换算为基准单位记录台账。")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
                     }
                 }
 
@@ -149,7 +194,7 @@ struct SKUFormView: View {
                     Color.black.opacity(0.3).ignoresSafeArea()
                     VStack(spacing: 12) {
                         ProgressView().scaleEffect(1.2)
-                        Text("AI 正在分析识别图片...").font(.subheadline).fontWeight(.medium)
+                        Text("AI 正在分析识别图片属性...").font(.subheadline).fontWeight(.medium)
                     }
                     .padding(20)
                     .background(Color.surface)
@@ -158,25 +203,22 @@ struct SKUFormView: View {
             }
             .navigationTitle(editing == nil ? "新增商品物料" : "编辑商品物料")
             .toolbar {
-                Button("取消") { dismiss() }
-                Button("保存") {
-                    if save() { dismiss() }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
                 }
-                .disabled(!canSave)
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        if save() { dismiss() }
+                    }
+                    .disabled(!canSave)
+                    .fontWeight(.semibold)
+                }
             }
             .sheet(item: $activeSheet, onDismiss: handleSheetDismissed) { sheet in
                 switch sheet {
                 case .camera:
                     CameraCaptureView { data in
                         pendingCameraData = data
-                    }
-                case .scanner:
-                    BarcodeScannerView { code in
-                        if !units.isEmpty {
-                            units[0].barcode = code
-                        }
-                        aiBannerMsg = "已扫描填充条码：\(code)"
-                        showAiBanner = true
                     }
                 }
             }
@@ -198,22 +240,33 @@ struct SKUFormView: View {
     }
 
     private var canSave: Bool {
-        !skuCode.isEmpty && !skuName.isEmpty && !units.isEmpty &&
+        !skuCode.trimmingCharacters(in: .whitespaces).isEmpty &&
+        !skuName.trimmingCharacters(in: .whitespaces).isEmpty &&
+        !baseUnit.trimmingCharacters(in: .whitespaces).isEmpty &&
+        !units.isEmpty &&
         units.allSatisfy { !$0.unitName.isEmpty && Double($0.conversionRatio) != nil }
     }
 
     private func loadIfEditing() {
         guard let s = editing else {
-            let randomCodeSuffix = String(format: "%04d", Int.random(in: 1000...9999))
-            skuCode = "SKU-\(randomCodeSuffix)"
+            skuCode = Self.generateRandomSKUCode()
 
             if let draft = initialDraft {
                 skuName = draft.skuName
                 categoryName = draft.categoryName
-                baseUnit = draft.baseUnit
+                baseUnit = draft.baseUnit.isEmpty ? "包" : draft.baseUnit
                 shelfLifeDays = draft.shelfLifeDays > 0 ? "\(draft.shelfLifeDays)" : "0"
-                let unitName = draft.baseUnit.isEmpty ? "散包" : draft.baseUnit
-                units = [PackagingUnitDraft(unitName: unitName, unitType: "BASE", conversionRatio: "1", barcode: draft.barcode ?? "")]
+
+                var initialUnits: [PackagingUnitDraft] = []
+                let baseName = draft.baseUnit.isEmpty ? "散包" : draft.baseUnit
+                initialUnits.append(PackagingUnitDraft(unitName: baseName, unitType: "BASE", conversionRatio: "1", barcode: draft.barcode ?? ""))
+
+                // 若识别到了大包装规格（如整箱），一并带入
+                if let pkgName = draft.packagingUnitName, !pkgName.isEmpty, let ratio = draft.conversionRatio, ratio > 1.0 {
+                    initialUnits.append(PackagingUnitDraft(unitName: pkgName, unitType: ratio >= 20 ? "LARGE" : "MID", conversionRatio: AppFormatters.fmt(ratio)))
+                }
+
+                units = initialUnits
                 capturedOutcome = draft.visionOutcome
                 aiBannerMsg = "✨ AI 识别预填已就绪：商品名称「\(draft.skuName)」及品类、单位、保质期已自动填入！"
                 showAiBanner = true
@@ -336,11 +389,10 @@ struct SKUFormView: View {
             shelfLifeDays = "\(days)"
             filledFields.append("保质期 \(days) 天")
         }
-        if let barcode = result.recognizedBarcode?.trimmingCharacters(in: .whitespacesAndNewlines), !barcode.isEmpty {
-            if !units.isEmpty {
-                units[0].barcode = barcode
-            }
-            filledFields.append("条码")
+        if let pkg = result.recognizedPackagingSpec, let ratio = result.recognizedConversionRatio, ratio > 1.0 {
+            let cleanUnitName = pkg.components(separatedBy: "(").first ?? "箱"
+            units.append(PackagingUnitDraft(unitName: cleanUnitName, unitType: ratio >= 20 ? "LARGE" : "MID", conversionRatio: AppFormatters.fmt(ratio)))
+            filledFields.append("规格「\(cleanUnitName) ×\(AppFormatters.fmt(ratio))」")
         }
 
         if !filledFields.isEmpty {
@@ -383,5 +435,41 @@ struct SKUFormView: View {
         } catch {
             AppLogger.shared.log(level: .error, category: .store, message: "商品图片特征保存失败", details: error.localizedDescription)
         }
+    }
+
+    private static func generateRandomSKUCode() -> String {
+        let randomCodeSuffix = String(format: "%04d", Int.random(in: 1000...9999))
+        return "SKU-\(randomCodeSuffix)"
+    }
+}
+
+/// 带有清晰 Label 的高对比表单行组件，避免填值后 Label 丢失
+struct LabeledFormField<Content: View>: View {
+    let label: String
+    var isRequired: Bool = false
+    let content: Content
+
+    init(label: String, isRequired: Bool = false, @ViewBuilder content: () -> Content) {
+        self.label = label
+        self.isRequired = isRequired
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text(label)
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.brand)
+                if isRequired {
+                    Text("*")
+                        .font(.caption)
+                        .foregroundColor(.danger)
+                }
+            }
+            content
+        }
+        .padding(.vertical, 3)
     }
 }

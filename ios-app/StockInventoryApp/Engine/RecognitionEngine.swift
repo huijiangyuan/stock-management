@@ -27,6 +27,8 @@ struct RecognitionResult {
     var recognizedCategory: String?
     var recognizedShelfLifeDays: Int?
     var recognizedBarcode: String?
+    var recognizedPackagingSpec: String?       // 如“箱(×24)”
+    var recognizedConversionRatio: Double?     // 换算系数，如 24.0
     var productionDate: Date?
     var expirationDate: Date?
 
@@ -40,6 +42,8 @@ struct RecognitionResult {
          recognizedCategory: String? = nil,
          recognizedShelfLifeDays: Int? = nil,
          recognizedBarcode: String? = nil,
+         recognizedPackagingSpec: String? = nil,
+         recognizedConversionRatio: Double? = nil,
          productionDate: Date? = nil,
          expirationDate: Date? = nil) {
         self.sku = sku
@@ -52,6 +56,8 @@ struct RecognitionResult {
         self.recognizedCategory = recognizedCategory
         self.recognizedShelfLifeDays = recognizedShelfLifeDays
         self.recognizedBarcode = recognizedBarcode
+        self.recognizedPackagingSpec = recognizedPackagingSpec
+        self.recognizedConversionRatio = recognizedConversionRatio
         self.productionDate = productionDate
         self.expirationDate = expirationDate
     }
@@ -85,6 +91,8 @@ struct SKUPrefillDraft: Sendable {
     var baseUnit: String
     var shelfLifeDays: Int
     var barcode: String?
+    var packagingUnitName: String?
+    var conversionRatio: Double?
     var productionDate: Date?
     var expirationDate: Date?
     var visionOutcome: VisionRecognitionOutcome?

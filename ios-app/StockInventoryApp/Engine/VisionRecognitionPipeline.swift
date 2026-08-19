@@ -264,6 +264,14 @@ final class VisionRecognitionPipeline {
             }
         }
 
+        // 5. 包装规格与装箱系数智能推断
+        if res.recognizedPackagingSpec == nil || res.recognizedConversionRatio == nil {
+            if let spec = SemanticCorrectionEngine.inferPackagingSpecification(from: ocrResult.fullText, baseUnit: res.recognizedUnit ?? "个") {
+                res.recognizedPackagingSpec = "\(spec.unitName)(×\(AppFormatters.fmt(spec.conversionRatio)))"
+                res.recognizedConversionRatio = spec.conversionRatio
+            }
+        }
+
         return res
     }
 

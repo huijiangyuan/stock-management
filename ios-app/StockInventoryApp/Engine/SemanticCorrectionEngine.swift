@@ -211,6 +211,65 @@ struct SemanticCorrectionEngine {
         return nil
     }
 
+    // MARK: - 包装规格与装箱系数推断
+
+    struct InferredPackagingSpec {
+        let unitName: String
+        let conversionRatio: Double
+        let unitType: String // BASE / MID / LARGE
+    }
+
+    /// 从包装文字中提取规格与装箱系数（如“24瓶/箱”、“12盒装”、“1*20袋”）
+    static func inferPackagingSpecification(from text: String, baseUnit: String = "个") -> InferredPackagingSpec? {
+        let clean = text.replacingOccurrences(of: " ", with: "")
+
+        // 规则 1: 匹配 “24瓶/箱” 或 “24包/大箱”
+        let pattern1 = "([0-9]+)\\s*(?:个|包|瓶|罐|盒|袋|支|份)?\\s*(?:/|每)\\s*(箱|大箱|中盒|提|件|桶)"
+        if let regex = try? NSRegularExpression(pattern: pattern1, options: .caseInsensitive) {
+            let ns = clean as NSString
+            if let match = regex.firstMatch(in: clean, options: [], range: NSRange(location: 0, length: ns.length)),
+               match.numberOfRanges >= 3 {
+                let qtyStr = ns.substring(with: match.range(at: 1))
+                let nameStr = ns.substring(with: match.range(at: 2))
+                if let qty = Double(qtyStr), qty > 1 {
+                    let type = qty >= 20 ? "LARGE" : "MID"
+                    return InferredPackagingSpec(unitName: nameStr, conversionRatio: qty, unitType: type)
+                }
+            }
+        }
+
+        // 规则 2: 匹配 “1*24” 或 “1×12”
+        let pattern2 = "(?:1|一)[*xX×]([0-9]+)\\s*(箱|盒|提|件)?"
+        if let regex = try? NSRegularExpression(pattern: pattern2, options: .caseInsensitive) {
+            let ns = clean as NSString
+            if let match = regex.firstMatch(in: clean, options: [], range: NSRange(location: 0, length: ns.length)),
+               match.numberOfRanges >= 2 {
+                let qtyStr = ns.substring(with: match.range(at: 1))
+                let nameStr = match.numberOfRanges >= 3 && match.range(at: 2).location != NSNotFound ? ns.substring(with: match.range(at: 2)) : "箱"
+                if let qty = Double(qtyStr), qty > 1 {
+                    let type = qty >= 20 ? "LARGE" : "MID"
+                    return InferredPackagingSpec(unitName: nameStr, conversionRatio: qty, unitType: type)
+                }
+            }
+        }
+
+        // 规则 3: 匹配 “24罐装” 或 “12瓶装”
+        let pattern3 = "([0-9]+)\\s*(?:个|包|瓶|罐|盒|袋)?装"
+        if let regex = try? NSRegularExpression(pattern: pattern3, options: .caseInsensitive) {
+            let ns = clean as NSString
+            if let match = regex.firstMatch(in: clean, options: [], range: NSRange(location: 0, length: ns.length)),
+               match.numberOfRanges >= 2 {
+                let qtyStr = ns.substring(with: match.range(at: 1))
+                if let qty = Double(qtyStr), qty > 1 {
+                    let type = qty >= 20 ? "LARGE" : "MID"
+                    return InferredPackagingSpec(unitName: "箱", conversionRatio: qty, unitType: type)
+                }
+            }
+        }
+
+        return nil
+    }
+
     // MARK: - 辅助计算：Levenshtein 编辑距离
 
     private static func levenshteinDistance(_ s1: String, _ s2: String) -> Int {

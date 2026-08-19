@@ -48,10 +48,28 @@ struct SKUDetailView: View {
                 }
 
                 AppCard {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("实时库存台账").font(.headline)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("实时库存台账").font(.headline)
+                            Spacer()
+                            let total = inventories.reduce(0.0) { $0 + $1.qtyBaseUnit }
+                            Text("在库总计: \(AppFormatters.fmt(total)) \(sku.baseUnit)")
+                                .font(.subheadline.bold())
+                                .foregroundColor(.brand)
+                        }
+
+                        let total = inventories.reduce(0.0) { $0 + $1.qtyBaseUnit }
+                        if total > 0 {
+                            let breakdown = InventoryStore.formatMultiUnitBreakdown(sku: sku, totalBaseQty: total)
+                            Text("折算大包装: \(breakdown)")
+                                .font(.caption.bold())
+                                .foregroundColor(.success)
+                        }
+
+                        Divider()
+
                         if inventories.isEmpty {
-                            Text("暂无库存").font(.subheadline).foregroundColor(.secondary)
+                            Text("暂无在库批次").font(.subheadline).foregroundColor(.secondary)
                         }
                         ForEach(inventories) { inv in
                             HStack {

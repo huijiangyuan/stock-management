@@ -20,6 +20,8 @@ final class InventoryStore {
         let conversionRatio: Double
         let mode: RecognitionMode
         var note: String? = nil
+        var originalBaseQty: Double? = nil
+        var differenceBaseQty: Double? = nil
     }
 
     @discardableResult
@@ -33,15 +35,27 @@ final class InventoryStore {
 
         for line in lines {
             let totalBase = line.operatingQty * line.conversionRatio
+            var originalBase: Double? = nil
+            var differenceBase: Double? = nil
+
+            if type == "CHECK" {
+                let currentBase = totalQty(location: location, sku: line.sku, batch: line.batch)
+                originalBase = line.originalBaseQty ?? currentBase
+                differenceBase = totalBase - (originalBase ?? 0)
+            }
+
             let item = StockOrderItem(operatingQty: line.operatingQty,
                                       conversionRatio: line.conversionRatio,
                                       totalBaseQty: totalBase,
                                       recognitionMode: line.mode.rawValue,
+                                      confidenceScore: nil,
+                                      note: line.note,
+                                      originalBaseQty: originalBase,
+                                      differenceBaseQty: differenceBase,
                                       header: header,
                                       sku: line.sku,
                                       unit: line.unit,
                                       batch: line.batch)
-            item.note = line.note
             context.insert(item)
             try applyToInventory(type: type, sku: line.sku, batch: line.batch,
                                  qty: totalBase, location: location)
@@ -164,5 +178,32 @@ final class InventoryStore {
         }
         try? context.save()
         return sku
+    }
+
+    // MARK: - 多规格折算与展示辅助
+
+    /// 将以 baseUnit 计量的总数量智能换算为多级包装组合显示
+    /// 例如：总数 125 瓶，规格含「箱(×24)」，则输出「5 箱 + 5 瓶」
+    static func formatMultiUnitBreakdown(sku: RawMaterialSKU, totalBaseQty: Double) -> String {
+        guard totalBaseQty > 0 else { return "0 \(sku.baseUnit)" }
+        let validUnits = sku.packagingUnits
+            .filter { $0.conversionRatio > 1.0 }
+            .sorted { $0.conversionRatio > $1.conversionRatio }
+
+        guard let largest = validUnits.first else {
+            return "\(AppFormatters.fmt(totalBaseQty)) \(sku.baseUnit)"
+        }
+
+        let ratio = largest.conversionRatio
+        let whole = Int(totalBaseQty / ratio)
+        let remainder = totalBaseQty.truncatingRemainder(dividingBy: ratio)
+
+        if whole > 0 && remainder > 0 {
+            return "\(whole) \(largest.unitName) + \(AppFormatters.fmt(remainder)) \(sku.baseUnit)"
+        } else if whole > 0 && remainder == 0 {
+            return "\(whole) \(largest.unitName)"
+        } else {
+            return "\(AppFormatters.fmt(totalBaseQty)) \(sku.baseUnit)"
+        }
     }
 }

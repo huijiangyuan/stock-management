@@ -8,7 +8,7 @@ struct MainTabView: View {
             SKUListView()
                 .tabItem { Label("库存", systemImage: "shippingbox.fill") }
             OrderHistoryView()
-                .tabItem { Label("单据", systemImage: "doc.plaintext.fill") }
+                .tabItem { Label("单据记录", systemImage: "list.bullet.rectangle.fill") }
             SettingsView()
                 .tabItem { Label("设置", systemImage: "gearshape.fill") }
         }

@@ -138,6 +138,99 @@ enum ExportImport {
         return url
     }
 
+    /// 将筛选后的单据记录导出为 UTF-8 CSV 报表文件（带 BOM，Excel 打开不乱码）
+    static func exportOrdersCSV(orders: [StockOrderHeader], timeRangeTitle: String = "全部") throws -> URL {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let dateDf = DateFormatter()
+        dateDf.dateFormat = "yyyy-MM-dd"
+
+        var csv = "\u{FEFF}" // UTF-8 BOM
+        // 表头
+        csv += "单据编号,单据类型,操作时间,商品编码,商品名称,商品品类,操作规格,操作数量,换算系数,基准单位,换算基准总量,批次号,生产日期,到期日期,盘前基准数(盘点),实盘基准数(盘点),盘盈盘亏(盘点),识别模式,备注说明\n"
+
+        for order in orders {
+            let typeLabel = order.orderType == "INBOUND" ? "入库单" : order.orderType == "OUTBOUND" ? "出库单" : "盘点单"
+            let timeStr = df.string(from: order.createdAt)
+            let remark = order.remark ?? ""
+
+            for item in order.items {
+                let skuCode = item.sku?.skuCode ?? ""
+                let skuName = item.sku?.skuName ?? "未知物料"
+                let category = item.sku?.categoryName ?? ""
+                let unitName = item.unit?.unitName ?? item.sku?.baseUnit ?? "个"
+                let opQty = AppFormatters.fmt(item.operatingQty)
+                let ratio = AppFormatters.fmt(item.conversionRatio)
+                let baseUnit = item.sku?.baseUnit ?? ""
+                let totalBase = AppFormatters.fmt(item.totalBaseQty)
+                let batchNo = item.batch?.batchNo ?? ""
+                let prodDate = item.batch?.productionDate.map { dateDf.string(from: $0) } ?? ""
+                let expDate = item.batch?.expirationDate.map { dateDf.string(from: $0) } ?? ""
+
+                var origQtyStr = ""
+                var countedQtyStr = ""
+                var diffQtyStr = ""
+                if order.orderType == "CHECK" {
+                    if let orig = item.originalBaseQty { origQtyStr = "\(AppFormatters.fmt(orig))" }
+                    countedQtyStr = totalBase
+                    if let diff = item.differenceBaseQty {
+                        if diff > 0 {
+                            diffQtyStr = "盘盈+\(AppFormatters.fmt(diff))"
+                        } else if diff < 0 {
+                            diffQtyStr = "盘亏\(AppFormatters.fmt(diff))"
+                        } else {
+                            diffQtyStr = "账实相符"
+                        }
+                    }
+                }
+
+                let mode = item.recognitionMode ?? "MANUAL"
+                let note = [item.note, remark].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " | ")
+
+                let row = [
+                    order.orderNo,
+                    typeLabel,
+                    timeStr,
+                    skuCode,
+                    skuName,
+                    category,
+                    unitName,
+                    opQty,
+                    ratio,
+                    baseUnit,
+                    totalBase,
+                    batchNo,
+                    prodDate,
+                    expDate,
+                    origQtyStr,
+                    countedQtyStr,
+                    diffQtyStr,
+                    mode,
+                    note
+                ].map { escapeCSVField($0) }.joined(separator: ",")
+
+                csv += row + "\n"
+            }
+        }
+
+        let fileName = "出入库单据报表_\(timeRangeTitle)_\(Self.stamp()).csv"
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(fileName)
+        guard let data = csv.data(using: .utf8) else {
+            throw NSError(domain: "CSVExportError", code: -1, userInfo: [NSLocalizedDescriptionKey: "无法生成 CSV 文本编码"])
+        }
+        try data.write(to: url)
+        return url
+    }
+
+    private static func escapeCSVField(_ str: String) -> String {
+        if str.contains(",") || str.contains("\"") || str.contains("\n") || str.contains("\r") {
+            let replaced = str.replacingOccurrences(of: "\"", with: "\"\"")
+            return "\"\(replaced)\""
+        }
+        return str
+    }
+
     static func `import`(from url: URL, context: ModelContext) throws {
         let data = try Data(contentsOf: url)
         let decoder = JSONDecoder()

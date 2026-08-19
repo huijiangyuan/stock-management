@@ -44,4 +44,26 @@ final class ExportImportTests: XCTestCase {
         XCTAssertEqual(decoded.visionModelVersion, "test-v1")
         XCTAssertEqual(decoded.visionVectorDimension, 512)
     }
+
+    func testExportOrdersCSVProducesValidUTF8BOMFile() throws {
+        let sku = RawMaterialSKU(skuCode: "SKU-001", skuName: "测试物料", categoryName: "默认品类", baseUnit: "瓶")
+        let unit = PackagingUnit(unitName: "箱", unitType: "LARGE", conversionRatio: 24.0, sku: sku)
+        let order = StockOrderHeader(orderNo: "ORD-20260819-01", orderType: "INBOUND", locationName: "A-01")
+        let item = StockOrderItem(order: order, sku: sku, unit: unit, operatingQty: 2, conversionRatio: 24.0, totalBaseQty: 48.0)
+        order.items.append(item)
+
+        let url = try ExportImport.exportOrdersCSV(orders: [order], timeRangeTitle: "本月")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let data = try Data(contentsOf: url)
+        let text = String(data: data, encoding: .utf8)
+
+        XCTAssertNotNil(text)
+        XCTAssertTrue(text!.starts(with: "\u{FEFF}"))
+        XCTAssertTrue(text!.contains("单据编号"))
+        XCTAssertTrue(text!.contains("ORD-20260819-01"))
+        XCTAssertTrue(text!.contains("入库单"))
+        XCTAssertTrue(text!.contains("测试物料"))
+        XCTAssertTrue(text!.contains("48.00"))
+    }
 }
