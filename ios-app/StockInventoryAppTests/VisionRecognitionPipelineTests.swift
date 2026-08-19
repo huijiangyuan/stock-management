@@ -131,7 +131,7 @@ final class VisionRecognitionPipelineTests: XCTestCase {
         let outcome = try await pipeline.extractAttributesForNewSKU(rawImageData: Data([0x01]))
 
         XCTAssertEqual(outcome.result.recognizedName, "德克士香辣鸡腿堡", "形近字‘德克上’应自动纠偏为‘德克士’")
-        XCTAssertEqual(outcome.result.displayCategoryName, "食品餐饮", "应根据‘德克士/汉堡’自动推理填充‘食品餐饮’品类")
+        XCTAssertEqual(outcome.result.displayCategoryName, "食品生鲜", "应根据‘德克士/汉堡’自动推理填充‘食品生鲜’品类")
         XCTAssertEqual(outcome.result.displayUnitName, "份", "应自动推断‘份’为基准单位")
     }
 

@@ -226,12 +226,12 @@ final class VisionRecognitionPipeline {
         )
     }
 
-    /// 使用 SemanticCorrectionEngine 对识别结果进行纠偏和缺失字段自动补齐
+    /// 使用 SemanticCorrectionEngine 对识别结果进行纠偏和缺失字段自动补齐（应填尽填，不乱填）
     private func enrichResult(_ input: RecognitionResult, ocrResult: VisionOCREngine.OCRResult) -> RecognitionResult {
         var res = input
         let existingCategories = fetchExistingCategoryNames()
 
-        // 1. 品名纠错与兜底
+        // 1. 品名纠错与兜底（必填）
         if let currentName = res.recognizedName, !currentName.isEmpty {
             res.recognizedName = SemanticCorrectionEngine.correctText(currentName)
         } else if let topTerm = ocrResult.topCandidateTerms.first {
@@ -240,7 +240,7 @@ final class VisionRecognitionPipeline {
 
         let effectiveName = res.recognizedName ?? ""
 
-        // 2. 品类自动推断与补全
+        // 2. 品类自动推断与补全（应填尽填：依据商品名称或文本精准推算）
         if res.recognizedCategory == nil || res.recognizedCategory?.isEmpty == true {
             let textToInfer = !effectiveName.isEmpty ? effectiveName : ocrResult.fullText
             res.recognizedCategory = SemanticCorrectionEngine.inferCategory(
@@ -249,22 +249,31 @@ final class VisionRecognitionPipeline {
             )
         }
 
-        // 3. 单位自动推断与补全
+        // 3. 单位自动推断与补全（有必填：依据品名特征或文本推断，无法推断默认"个"）
         if res.recognizedUnit == nil || res.recognizedUnit?.isEmpty == true {
             let textToInfer = !effectiveName.isEmpty ? effectiveName : ocrResult.fullText
             if !textToInfer.isEmpty {
                 res.recognizedUnit = SemanticCorrectionEngine.inferBaseUnit(from: textToInfer)
+            } else {
+                res.recognizedUnit = "个"
             }
         }
 
-        // 4. 保质期天数智能推断
+        // 4. 保质期天数智能推断（严谨原则：有明确保质期文字才填，没有绝不瞎填）
         if res.recognizedShelfLifeDays == nil || res.recognizedShelfLifeDays == 0 {
             if let days = SemanticCorrectionEngine.inferShelfLifeDays(from: ocrResult.fullText) {
                 res.recognizedShelfLifeDays = days
             }
         }
 
-        // 5. 包装规格与装箱系数智能推断
+        // 5. 供应商/生产企业智能提取
+        if res.recognizedSupplier == nil || res.recognizedSupplier?.isEmpty == true {
+            if let sup = SemanticCorrectionEngine.inferSupplier(from: ocrResult.fullText) {
+                res.recognizedSupplier = sup
+            }
+        }
+
+        // 6. 包装规格与装箱系数智能推断
         if res.recognizedPackagingSpec == nil || res.recognizedConversionRatio == nil {
             if let spec = SemanticCorrectionEngine.inferPackagingSpecification(from: ocrResult.fullText, baseUnit: res.recognizedUnit ?? "个") {
                 res.recognizedPackagingSpec = "\(spec.unitName)(×\(AppFormatters.fmt(spec.conversionRatio)))"

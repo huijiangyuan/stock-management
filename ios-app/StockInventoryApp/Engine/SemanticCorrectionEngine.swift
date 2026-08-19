@@ -78,65 +78,82 @@ struct SemanticCorrectionEngine {
 
     // MARK: - 品类自动推理 (Category Inference)
 
-    /// 依据品名关键词或全文自动推断商品所属分类
+    /// 依据品名关键词或全文自动推断商品所属分类（应填尽填，精准推算）
     static func inferCategory(from text: String, existingCategories: [String] = []) -> String? {
         let clean = text.lowercased().replacingOccurrences(of: " ", with: "")
         guard !clean.isEmpty else { return nil }
 
-        // 核心分类关键词规则库（支持词根及细分词素）
+        // 核心分类关键词规则库（支持品名、成分、用途、品牌深度推断）
         let categoryRules: [(category: String, keywords: [String])] = [
-            ("食品餐饮", [
-                "德克士", "肯德基", "麦当劳", "汉堡", "炸鸡", "鸡腿", "鸡块", "薯条", "堡", "咖啡",
-                "奶茶", "可乐", "牛奶", "果汁", "饮料", "面包", "饼干", "蛋糕", "燕麦", "零食",
-                "牛肉", "鸡肉", "猪肉", "海鲜", "蔬菜", "水果", "调味", "酱油", "食用油", "大米",
-                "面粉", "方便面", "罐头", "糖果", "巧克力", "茶叶", "饮用水", "冰淇淋", "餐饮", "食品", "快餐"
+            ("食品生鲜", [
+                "炸鸡", "鸡腿", "鸡翅", "鸡块", "汉堡", "薯条", "牛肉", "猪肉", "羊肉", "鸡肉",
+                "牛排", "肥牛", "肉卷", "培根", "香肠", "火腿", "水产", "海鲜", "鱼", "虾", "蟹",
+                "蔬菜", "水果", "苹果", "香蕉", "番茄", "鸡蛋", "面包", "吐司", "蛋糕", "饼干",
+                "燕麦", "大米", "面粉", "挂面", "方便面", "零食", "糖果", "巧克力", "坚果", "冷冻食品",
+                "酱油", "食用油", "花生油", "香油", "调味", "火锅底料", "番茄酱", "沙拉酱", "德克士",
+                "肯德基", "麦当劳", "海底捞", "汉堡王", "塔斯汀", "双汇", "金锣", "达利园", "徐福记"
+            ]),
+            ("酒水饮料", [
+                "可乐", "可口可乐", "百事可乐", "雪碧", "芬达", "汽水", "苏打水", "矿泉水", "饮用水",
+                "纯净水", "农夫山泉", "娃哈哈", "果汁", "橙汁", "椰汁", "椰树", "牛奶", "纯牛奶",
+                "酸奶", "伊利", "蒙牛", "光明", "咖啡", "拿铁", "美式", "雀巢", "星巴克", "茶叶",
+                "绿茶", "红茶", "乌龙茶", "奶茶", "元气森林", "喜茶", "啤酒", "白酒", "红酒", "饮料"
+            ]),
+            ("日用百货", [
+                "纸巾", "抽纸", "卷纸", "湿巾", "手帕纸", "洗手液", "洗洁精", "洗衣液", "洗衣粉",
+                "肥皂", "香皂", "洗发水", "沐浴露", "牙膏", "牙刷", "毛巾", "抹布", "垃圾袋",
+                "保鲜膜", "保鲜袋", "一次性纸杯", "一次性手套", "纸杯", "拖把", "扫把", "日用", "百货"
+            ]),
+            ("办公耗材", [
+                "打印纸", "复印纸", "a4纸", "a3纸", "签字笔", "圆珠笔", "中性笔", "记号笔", "荧光笔",
+                "订书机", "订书针", "文件夹", "资料册", "档案袋", "橡皮", "剪刀", "美工刀", "计算器",
+                "墨盒", "硒鼓", "碳粉", "标签纸", "热敏纸", "便签", "记事本", "文具", "办公"
             ]),
             ("五金配件", [
                 "螺栓", "螺丝", "螺母", "螺钉", "垫圈", "垫片", "轴承", "弹簧", "销轴", "卡簧",
-                "铆钉", "锁具", "合页", "滑轨", "把手", "五金", "紧固件", "索具", "夹具"
+                "铆钉", "锁具", "合页", "铰链", "滑轨", "把手", "扳手", "螺丝刀", "钳子", "锤子",
+                "五金", "紧固件", "索具", "夹具", "量具", "卡尺"
             ]),
             ("金属材料", [
-                "铜管", "铜排", "紫铜", "黄铜", "钢管", "不锈钢", "铝合金", "型材", "板材", "圆钢",
-                "方管", "镀锌", "冷轧", "热轧", "碳钢", "角钢", "槽钢", "工字钢", "钢丝", "金属", "钢板"
+                "铜管", "紫铜", "黄铜", "铜排", "钢管", "不锈钢", "铝合金", "铝型材", "型材",
+                "板材", "圆钢", "方管", "镀锌", "冷轧", "热轧", "碳钢", "角钢", "槽钢", "工字钢",
+                "钢丝", "金属", "钢板", "铝板"
             ]),
             ("机械传动", [
-                "齿轮", "皮带", "同步带", "链条", "链轮", "联轴器", "减速机", "电机", "马达",
-                "气缸", "气动", "液压", "阀门", "电磁阀", "水泵", "风机", "机械"
+                "齿轮", "皮带", "同步带", "三角带", "链条", "链轮", "联轴器", "减速机", "减速电机",
+                "步进电机", "伺服电机", "电机", "马达", "气缸", "气动接头", "电磁阀", "水泵", "风机",
+                "接近开关", "限位开关", "机械"
             ]),
-            ("包装材料", [
-                "纸箱", "瓦楞", "编织袋", "胶带", "缠绕膜", "气泡膜", "托盘", "包装袋", "泡沫",
-                "木箱", "塑料袋", "封口胶", "耗材", "包装"
+            ("包装耗材", [
+                "纸箱", "瓦楞", "编织袋", "胶带", "封箱胶", "缠绕膜", "拉伸膜", "气泡膜", "气泡袋",
+                "托盘", "包装袋", "泡沫箱", "珍珠棉", "打包带", "木箱", "塑料托盘", "耗材", "包装"
             ]),
             ("化工辅料", [
-                "润滑", "机油", "黄油", "清洗剂", "脱脂剂", "防锈", "密封胶", "树脂", "胶水",
-                "涂料", "油漆", "固化剂", "溶剂", "稀释剂", "化工", "硅脂"
+                "润滑", "机油", "黄油", "润滑脂", "清洗剂", "脱脂剂", "防锈剂", "防锈油", "密封胶",
+                "硅酮胶", "玻璃胶", "ab胶", "502", "树脂", "胶水", "涂料", "油漆", "固化剂",
+                "稀释剂", "化工", "硅脂", "脱模剂"
             ]),
-            ("电子元器件", [
+            ("电子数码", [
                 "芯片", "电阻", "电容", "二极管", "三极管", "电感", "晶振", "继电器", "传感器",
-                "开关", "接线端", "插头", "电缆", "电路板", "元器件", "电子"
+                "开关", "接线端子", "插头", "插座", "电源", "适配器", "电缆", "电线", "电路板",
+                "pcb", "电池", "保险丝", "元器件", "电子"
             ]),
-            ("劳保日化", [
-                "手套", "口罩", "安全帽", "防护服", "护目镜", "洗手液", "消毒液", "毛巾", "抹布",
-                "洗衣液", "劳保", "日化", "清洁"
-            ]),
-            ("办公文具", [
-                "打印纸", "复印纸", "签字笔", "订书机", "文件夹", "档案袋", "橡皮", "剪刀",
-                "计算器", "墨盒", "硒鼓", "文具", "办公"
+            ("劳保用品", [
+                "安全帽", "劳保手套", "防割手套", "防护服", "护目镜", "防护面罩", "防尘口罩",
+                "n95", "反光背心", "安全带", "绝缘鞋", "劳保鞋", "耳塞", "防护", "劳保"
             ])
         ]
 
-        // 1. 优先匹配已有库中用户自定义分类
+        // 1. 优先匹配已有库中用户已有的分类名称
         for existing in existingCategories {
             let cleanExisting = existing.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleanExisting.isEmpty else { continue }
 
-            // 如果现有分类名称与待识别文本有交集（如现有分类“西式快餐”，识别到“德克士炸鸡快餐”）
             if clean.contains(cleanExisting.lowercased()) || cleanExisting.lowercased().contains(clean) {
                 return cleanExisting
             }
 
             for rule in categoryRules {
-                // 如果现有分类命中了规则库中的任一分类语义
                 let matchedRuleCategory = rule.category == cleanExisting || cleanExisting.contains(rule.category) || rule.keywords.contains(where: { cleanExisting.lowercased().contains($0) })
                 if matchedRuleCategory {
                     if rule.keywords.contains(where: { clean.contains($0.lowercased()) }) {
@@ -146,7 +163,7 @@ struct SemanticCorrectionEngine {
             }
         }
 
-        // 2. 根据内置规则库匹配推荐分类
+        // 2. 根据内置规则库精准推算分类
         for rule in categoryRules {
             if rule.keywords.contains(where: { clean.contains($0.lowercased()) }) {
                 return rule.category
@@ -158,55 +175,99 @@ struct SemanticCorrectionEngine {
 
     // MARK: - 基准单位自动推断 (Unit Inference)
 
-    /// 依据品名形态推断常见基准计量单位
+    /// 依据品名形态推断常见基准计量单位（有必填，能推断就填）
     static func inferBaseUnit(from text: String) -> String {
         let clean = text.lowercased()
-        if clean.contains("管") || clean.contains("型材") || clean.contains("轴") || clean.contains("棒") {
+        if clean.contains("听") {
+            return "听"
+        }
+        if clean.contains("罐") {
+            return "罐"
+        }
+        if clean.contains("瓶") || clean.contains("水") || clean.contains("可乐") || clean.contains("饮料") || clean.contains("奶") || clean.contains("雪碧") {
+            return "瓶"
+        }
+        if clean.contains("管") || clean.contains("型材") || clean.contains("轴") || clean.contains("棒") || clean.contains("笔") || clean.contains("胶条") {
             return "根"
         }
-        if clean.contains("板") || clean.contains("片") {
+        if clean.contains("板") || clean.contains("片") || clean.contains("纸") || clean.contains("膜") {
             return "张"
         }
-        if clean.contains("油") || clean.contains("水") || clean.contains("饮料") || clean.contains("奶") || clean.contains("剂") || clean.contains("脂") {
-            if clean.contains("桶") || clean.contains("脂") || clean.contains("润滑") { return "桶" }
-            if clean.contains("罐") { return "罐" }
-            return "瓶"
+        if clean.contains("桶") || clean.contains("油") || clean.contains("漆") || clean.contains("乳胶") || clean.contains("脂") {
+            return "桶"
         }
         if clean.contains("箱") {
             return "箱"
         }
-        if clean.contains("袋") || clean.contains("包") || clean.contains("粉") || clean.contains("米") || clean.contains("豆") {
+        if clean.contains("盒") {
+            return "盒"
+        }
+        if clean.contains("袋") || clean.contains("包") || clean.contains("粉") || clean.contains("米") || clean.contains("豆") || clean.contains("抽") {
             return "包"
         }
-        if clean.contains("卷") || clean.contains("带") || clean.contains("膜") {
+        if clean.contains("卷") || clean.contains("带") || clean.contains("绳") || clean.contains("线") {
             return "卷"
+        }
+        if clean.contains("支") || clean.contains("针") || clean.contains("牙膏") || clean.contains("硅胶") {
+            return "支"
+        }
+        if clean.contains("双") || clean.contains("鞋") || clean.contains("手套") {
+            return "双"
+        }
+        if clean.contains("副") || clean.contains("套") || clean.contains("具") {
+            return "套"
+        }
+        if clean.contains("台") || clean.contains("机") || clean.contains("泵") {
+            return "台"
+        }
+        if clean.contains("汉堡") || clean.contains("炸鸡") || clean.contains("套餐") || clean.contains("德克士") || clean.contains("快餐") {
+            return "份"
         }
         if clean.contains("螺") || clean.contains("轴承") || clean.contains("垫") || clean.contains("销") || clean.contains("阀") || clean.contains("芯片") || clean.contains("电机") {
             return "个"
         }
-        if clean.contains("汉堡") || clean.contains("炸鸡") || clean.contains("套餐") || clean.contains("德克士") || clean.contains("堡") {
-            return "份"
-        }
         return "个"
     }
 
-    // MARK: - 保质期天数智能推断
+    // MARK: - 保质期天数严谨推断（有则填，无则坚决不填）
 
-    /// 依据品类或文本中包含的保质期描述自动换算天数
+    /// 严格依据文本中明确包含的保质期关键词换算天数（绝不盲目瞎猜或将生产日期/数量误认）
     static func inferShelfLifeDays(from text: String) -> Int? {
-        let pattern = "(?:保质期|保存期|EXP)?\\s*([0-9]+)\\s*(天|日|个月|月|年)"
-        if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
-            let nsString = text as NSString
-            if let match = regex.firstMatch(in: text, options: [], range: NSRange(location: 0, length: nsString.length)),
-               match.numberOfRanges >= 3 {
-                let numStr = nsString.substring(with: match.range(at: 1))
-                let unitStr = nsString.substring(with: match.range(at: 2))
-                if let num = Int(numStr) {
-                    if unitStr.contains("年") { return num * 365 }
-                    if unitStr.contains("月") { return num * 30 }
-                    return num
-                }
-            }
+        // 严格模式：必须紧跟保质期专属引导词
+        let pattern = "(?:保质期|保存期|有效(?:期|天数)|Shelf\\s*Life|EXP|Best\\s*Before)[:：]?\\s*([0-9]+)\\s*(天|日|个月|月|年|days?|months?|years?)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        let nsString = text as NSString
+        guard let match = regex.firstMatch(in: text, options: [], range: NSRange(location: 0, length: nsString.length)),
+              match.numberOfRanges >= 3 else {
+            return nil
+        }
+        let numStr = nsString.substring(with: match.range(at: 1))
+        let unitStr = nsString.substring(with: match.range(at: 2)).lowercased()
+        guard let num = Int(numStr), num > 0 && num <= 3650 else { return nil }
+
+        if unitStr.contains("年") || unitStr.contains("year") {
+            return num * 365
+        }
+        if unitStr.contains("月") || unitStr.contains("month") {
+            return num * 30
+        }
+        if unitStr.contains("天") || unitStr.contains("日") || unitStr.contains("day") {
+            return num
+        }
+        return nil
+    }
+
+    // MARK: - 供应商/生产商智能提取
+
+    /// 从识别文字中尝试提取供应商或生产企业名称
+    static func inferSupplier(from text: String) -> String? {
+        let pattern = "(?:供应商|生产商|制造商|委托商|出品商|企业名称|品牌)[:：]?\\s*([\\u4e00-\\u9fa5A-Za-z0-9_（）()]{4,30}(?:公司|厂|行|店|集团|有限合伙))"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        let nsString = text as NSString
+        if let match = regex.firstMatch(in: text, options: [], range: NSRange(location: 0, length: nsString.length)),
+           match.numberOfRanges >= 2 {
+            let res = nsString.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !res.isEmpty { return res }
         }
         return nil
     }

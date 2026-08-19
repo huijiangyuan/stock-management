@@ -9,15 +9,16 @@ struct CloudVisionEngine: RecognitionEngine {
     static let prompt = """
     你是智能库存与商品物料识别助手。请看图识别包装上的商品，并直接返回单行紧凑 JSON（不要多余解释）：
     {
-      "sku_name": "标准品名，如 精品肥牛卷 / 502胶水",
-      "unit_name": "规格单位，如 箱 / 盒 / 瓶 / 包 / 个 / kg",
-      "category_name": "品类，如 食品 / 五金 / 日化 / 耗材",
-      "shelf_life_days": 365,
-      "barcode": "条形码（若可见）",
-      "production_date": "生产日期 yyyy-MM-dd",
-      "expiration_date": "到期日期 yyyy-MM-dd",
+      "sku_name": "准确标准品名，如 可口可乐(330ml) / M8螺栓",
+      "unit_name": "基准规格单位，如 箱 / 盒 / 瓶 / 包 / 个 / 罐 / 支 / kg",
+      "category_name": "品类，如 食品生鲜 / 酒水饮料 / 日用百货 / 办公耗材 / 五金配件 / 包装耗材 / 机械传动 / 化工辅料 / 电子数码 / 劳保用品",
+      "shelf_life_days": 0,
+      "barcode": "",
+      "production_date": "",
+      "expiration_date": "",
       "confidence": 0.95
     }
+    注意：品类根据品名准确推算；生产日期/到期日期仅在包装印有清晰真实日期时填写，没有请留空字符串；无保质期或长期有效保质期天数填0，严禁乱填！
     """
 
     func recognize(_ input: RecognitionInput, context: ModelContext) async -> RecognitionResult {
@@ -61,7 +62,8 @@ struct CloudVisionEngine: RecognitionEngine {
         let conf = raw.confidence
         let prod = parseDate(raw.productionDate)
         var exp = parseDate(raw.expirationDate)
-        let shelfLife = raw.shelfLifeDays ?? sku?.shelfLifeDays
+        let rawDays = (raw.shelfLifeDays != nil && raw.shelfLifeDays! > 0) ? raw.shelfLifeDays : nil
+        let shelfLife = rawDays ?? (sku?.shelfLifeDays != nil && sku!.shelfLifeDays > 0 ? sku!.shelfLifeDays : nil)
         if exp == nil, let p = prod, let days = shelfLife, days > 0 {
             exp = Calendar.current.date(byAdding: .day, value: days, to: p)
         }
@@ -83,7 +85,7 @@ struct CloudVisionEngine: RecognitionEngine {
         )
     }
 
-    /// 宽松日期解析：优先 yyyy-MM-dd，兼容 yyyy.MM.dd / yyyy/MM/dd
+    /// 宽松日期解析：优先 yyyy-MM-dd，兼容 yyyy.MM.dd / yyyy/MM/dd，且年份在合理区间内
     static func parseDate(_ s: String?) -> Date? {
         guard let s, !s.isEmpty else { return nil }
         let fmts = ["yyyy-MM-dd", "yyyy.MM.dd", "yyyy/MM/dd"]
@@ -91,7 +93,12 @@ struct CloudVisionEngine: RecognitionEngine {
         df.locale = Locale(identifier: "zh_CN")
         for f in fmts {
             df.dateFormat = f
-            if let d = df.date(from: s) { return d }
+            if let d = df.date(from: s) {
+                let comp = Calendar(identifier: .gregorian).dateComponents([.year], from: d)
+                if let y = comp.year, y >= 2015 && y <= 2038 {
+                    return d
+                }
+            }
         }
         return nil
     }

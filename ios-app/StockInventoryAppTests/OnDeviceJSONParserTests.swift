@@ -5,21 +5,23 @@ import XCTest
 final class OnDeviceJSONParserTests: XCTestCase {
 
     func testParseStandardJSON() {
-        let text = "{\"名称\":\"纯正橡胶圈\",\"规格单位\":\"个\",\"品类\":\"密封五金\",\"保质期天数\":365,\"条码\":\"6901234567890\",\"生产日期\":\"2026-08-01\",\"保质期\":\"2027-08-01\",\"置信度\":0.92}"
+        let text = "{\"名称\":\"纯正橡胶圈\",\"规格单位\":\"个\",\"品类\":\"密封五金\",\"保质期天数\":0,\"条码\":\"6901234567890\",\"供应商\":\"橡胶密封制造厂\",\"单价\":1.25,\"置信度\":0.92}"
         let result = OnDeviceVisionEngine.parseResult(text, imageData: Data())
 
         XCTAssertEqual(result.recognizedName, "纯正橡胶圈")
         XCTAssertEqual(result.recognizedUnit, "个")
         XCTAssertEqual(result.recognizedCategory, "密封五金")
-        XCTAssertEqual(result.recognizedShelfLifeDays, 365)
+        XCTAssertNil(result.recognizedShelfLifeDays, "保质期为0时应为nil，不乱填虚假保质期")
         XCTAssertEqual(result.recognizedBarcode, "6901234567890")
+        XCTAssertEqual(result.recognizedSupplier, "橡胶密封制造厂")
+        XCTAssertEqual(result.recognizedPrice, 1.25)
         XCTAssertEqual(result.displayUnitName, "个")
         XCTAssertEqual(result.displayCategoryName, "密封五金")
-        XCTAssertEqual(result.displayShelfLifeDays, 365)
+        XCTAssertNil(result.displayShelfLifeDays)
         XCTAssertEqual(result.confidence, 0.92, accuracy: 0.001)
         XCTAssertFalse(result.needsLearning)
-        XCTAssertNotNil(result.productionDate)
-        XCTAssertNotNil(result.expirationDate)
+        XCTAssertNil(result.productionDate)
+        XCTAssertNil(result.expirationDate)
     }
 
     func testParseMarkdownWrappedJSON() {

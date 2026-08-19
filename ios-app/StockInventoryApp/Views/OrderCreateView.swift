@@ -644,6 +644,8 @@ struct OrderCreateView: View {
         visionResultName = newSKU.skuName
         if let pd = draft.productionDate { productionDate = pd }
         if let ed = draft.expirationDate { expirationDate = ed }
+        if let s = draft.supplier, !s.isEmpty { supplier = s }
+        if let p = draft.inboundPrice, p > 0 { inboundPrice = AppFormatters.fmt(p) }
         if batchNo.isEmpty { batchNo = Self.autoBatchNo(newSKU) }
 
         AppLogger.shared.log(level: .info, category: .ai, message: "一键快捷创建商品底库并自动填表: 「\(skuName)」(\(skuCode))")
@@ -659,6 +661,8 @@ struct OrderCreateView: View {
         if let draft = draft {
             if let pd = draft.productionDate { productionDate = pd }
             if let ed = draft.expirationDate { expirationDate = ed }
+            if let s = draft.supplier, !s.isEmpty { supplier = s }
+            if let p = draft.inboundPrice, p > 0 { inboundPrice = AppFormatters.fmt(p) }
             if batchNo.isEmpty { batchNo = Self.autoBatchNo(newSKU) }
             if let outcome = draft.visionOutcome {
                 latestVisionOutcome = outcome
@@ -666,6 +670,8 @@ struct OrderCreateView: View {
         } else if let outcome = latestVisionOutcome {
             if let pd = outcome.result.productionDate { productionDate = pd }
             if let ed = outcome.result.expirationDate { expirationDate = ed }
+            if let s = outcome.result.recognizedSupplier, !s.isEmpty { supplier = s }
+            if let p = outcome.result.recognizedPrice, p > 0 { inboundPrice = AppFormatters.fmt(p) }
             if batchNo.isEmpty { batchNo = Self.autoBatchNo(newSKU) }
         } else {
             if batchNo.isEmpty { batchNo = Self.autoBatchNo(newSKU) }
@@ -680,6 +686,8 @@ struct OrderCreateView: View {
             selectedUnit = result.packagingUnit ?? sku.packagingUnits.first
             if let pd = result.productionDate { productionDate = pd }
             if let ed = result.expirationDate { expirationDate = ed }
+            if let s = result.recognizedSupplier, !s.isEmpty { supplier = s }
+            if let p = result.recognizedPrice, p > 0 { inboundPrice = AppFormatters.fmt(p) }
             if batchNo.isEmpty { batchNo = Self.autoBatchNo(sku) }
             lastMode = .vision
             visionResultName = result.recognizedName

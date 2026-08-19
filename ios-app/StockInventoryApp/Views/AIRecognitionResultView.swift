@@ -53,6 +53,8 @@ struct AIRecognitionResultView: View {
             barcode: result.recognizedBarcode,
             packagingUnitName: cleanPkgUnit,
             conversionRatio: result.recognizedConversionRatio,
+            supplier: result.recognizedSupplier,
+            inboundPrice: result.recognizedPrice,
             productionDate: result.productionDate,
             expirationDate: result.expirationDate,
             visionOutcome: outcome
@@ -152,6 +154,18 @@ struct AIRecognitionResultView: View {
                                 Divider()
                                 RecognitionFieldRow(label: "标准保质期",
                                                    value: "\(days) 天",
+                                                   fallback: "—")
+                            }
+                            if let sup = result.recognizedSupplier, !sup.isEmpty {
+                                Divider()
+                                RecognitionFieldRow(label: "供应商/产商",
+                                                   value: sup,
+                                                   fallback: "—")
+                            }
+                            if let p = result.recognizedPrice, p > 0 {
+                                Divider()
+                                RecognitionFieldRow(label: "参考单价",
+                                                   value: "¥\(AppFormatters.fmt(p)) 元",
                                                    fallback: "—")
                             }
                             Divider()

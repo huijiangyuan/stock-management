@@ -43,11 +43,11 @@ final class OnDeviceVisionEngine: ObservableObject {
 
     // MARK: - Prompt
 
-    /// 入库识别 Prompt：要求模型以单行紧凑 JSON 输出完整结构化字段，禁止冗余废话。
+    /// 入库识别 Prompt：要求模型以单行紧凑 JSON 输出完整结构化字段，严禁瞎编乱填。
     static let inboundPrompt = """
-    请识别图片中的库存商品/原材料。直接以单行紧凑 JSON 输出，不要输出任何思考过程或多余解释：
-    {"名称":"商品品名","规格单位":"个/包/盒/瓶/箱/kg","品类":"分类(如食品/五金/日化/耗材)","保质期天数":365,"生产日期":"YYYY-MM-DD","保质期":"YYYY-MM-DD","条码":"","置信度":0.95}
-    无法确定的字段留空字符串或填0。
+    请识别图片中的库存商品/物料。直接以单行紧凑 JSON 输出，不要输出任何思考过程或多余解释：
+    {"名称":"商品品名","规格单位":"个/包/盒/瓶/箱/kg","品类":"分类","保质期天数":0,"生产日期":"","到期日期":"","供应商":"","单价":0,"置信度":0.95}
+    规则：品类能从品名推断则精准推算；生产日期/到期日期仅在包装印有清晰真实日期时填写，没有请留空字符串；无保质期或长期有效保质期天数填0，严禁乱填！
     """
 
     // MARK: - Init
@@ -212,7 +212,7 @@ final class OnDeviceVisionEngine: ObservableObject {
             actualPrompt = p
         } else if let hint = ocrHint?.trimmingCharacters(in: .whitespacesAndNewlines), !hint.isEmpty {
             actualPrompt = """
-            参考文字:"\(hint.prefix(80))"。纠正并输出单行紧凑JSON:{"名称":"品名","规格单位":"个/包/盒/份","品类":"分类","保质期天数":365,"生产日期":"YYYY-MM-DD","保质期":"YYYY-MM-DD","条码":""}
+            参考文字:"\(hint.prefix(80))"。纠正并输出单行紧凑JSON:{"名称":"品名","规格单位":"个/包/盒/份","品类":"分类","保质期天数":0,"生产日期":"","到期日期":"","供应商":""}
             """
         } else {
             actualPrompt = Self.inboundPrompt
@@ -396,6 +396,9 @@ final class OnDeviceVisionEngine: ObservableObject {
         if let exp = extractValue("[\"“”]?(?:保质期|到期日期|exp_date|expiration_date)[\"“”]?\\s*(?::|：)\\s*[\"“”]?([0-9]{4}[-/.][0-9]{1,2}[-/.][0-9]{1,2})[\"“”]?") {
             dict["保质期"] = exp
         }
+        if let supplier = extractValue("[\"“”]?(?:供应商|supplier|生产商|制造商)[\"“”]?\\s*(?::|：)\\s*[\"“”]?([^\",，\n“”]+)[\"“”]?") {
+            dict["供应商"] = supplier
+        }
         if let confStr = extractValue("[\"“”]?(?:置信度|confidence)[\"“”]?\\s*(?::|：)\\s*[\"“”]?([0-9.]+)[\"“”]?"),
            let conf = Double(confStr) {
             dict["置信度"] = conf
@@ -422,15 +425,21 @@ final class OnDeviceVisionEngine: ObservableObject {
         let unit = str(["规格单位", "unit", "unit_name", "单位", "包装单位"]) ?? (name.map { SemanticCorrectionEngine.inferBaseUnit(from: $0) })
         let category = str(["品类", "category", "category_name", "分类"]) ?? (name.flatMap { SemanticCorrectionEngine.inferCategory(from: $0) })
         let barcode = str(["条码", "barcode", "条形码"])
+        let supplier = str(["供应商", "supplier", "生产商", "制造商", "出品商"])
+
+        var price: Double? = nil
+        if let pVal = dict["单价"] ?? dict["价格"] ?? dict["inbound_price"] ?? dict["price"] {
+            if let n = pVal as? NSNumber { price = n.doubleValue }
+            else if let s = pVal as? String, let d = Double(s) { price = d }
+        }
 
         var shelfLifeDays: Int? = nil
         for k in ["保质期天数", "shelf_life_days", "保质期天", "shelf_life"] {
             if let v = dict[k] {
-                if let n = v as? NSNumber { shelfLifeDays = n.intValue; break }
+                if let n = v as? NSNumber, n.intValue > 0 { shelfLifeDays = n.intValue; break }
                 if let s = v as? String {
                     let digits = s.filter { $0.isNumber }
                     if let d = Int(digits), d > 0 {
-                        // 如果包含“月”则乘 30
                         if s.contains("月") || s.contains("month") {
                             shelfLifeDays = d * 30
                         } else if s.contains("年") || s.contains("year") {
@@ -459,6 +468,8 @@ final class OnDeviceVisionEngine: ObservableObject {
             recognizedCategory: category,
             recognizedShelfLifeDays: shelfLifeDays,
             recognizedBarcode: barcode,
+            recognizedSupplier: supplier,
+            recognizedPrice: price,
             productionDate: prod,
             expirationDate: exp
         )
@@ -481,7 +492,12 @@ final class OnDeviceVisionEngine: ObservableObject {
         df.timeZone = TimeZone(identifier: "Asia/Shanghai")
         for f in fmts {
             df.dateFormat = f
-            if let d = df.date(from: s) { return d }
+            if let d = df.date(from: s) {
+                let comp = Calendar(identifier: .gregorian).dateComponents([.year], from: d)
+                if let y = comp.year, y >= 2015 && y <= 2038 {
+                    return d
+                }
+            }
         }
         return nil
     }
