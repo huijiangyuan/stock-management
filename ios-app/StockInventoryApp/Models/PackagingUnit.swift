@@ -17,7 +17,7 @@ final class PackagingUnit {
 
     init(unitId: String = UUID().uuidString,
          unitName: String,
-         unitType: String,
+         unitType: String = "BASE",
          conversionRatio: Double,
          barcode: String? = nil,
          sku: RawMaterialSKU? = nil) {

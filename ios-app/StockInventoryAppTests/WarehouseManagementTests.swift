@@ -24,7 +24,7 @@ final class WarehouseManagementTests: XCTestCase {
         // 2. 创建物料与批次
         let sku = RawMaterialSKU(skuCode: "SKU-BEEF", skuName: "精品肥牛卷", categoryName: "食品生鲜", baseUnit: "盒")
         ctx.insert(sku)
-        let unit = PackagingUnit(unitName: "盒", conversionRatio: 1.0, sku: sku)
+        let unit = PackagingUnit(unitName: "盒", unitType: "BASE", conversionRatio: 1.0, sku: sku)
         ctx.insert(unit)
         let batchA = StockBatch(batchNo: "B-A01", inboundPrice: 35.0, sku: sku)
         let batchB = StockBatch(batchNo: "B-B01", inboundPrice: 38.0, sku: sku)
