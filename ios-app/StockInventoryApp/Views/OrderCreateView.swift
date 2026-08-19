@@ -120,17 +120,6 @@ struct OrderCreateView: View {
                         .padding(.vertical, 4)
                     }
 
-                    Section("业务操作类型") {
-                        Picker("类型", selection: $orderType) {
-                            Text("入库").tag("INBOUND")
-                            Text("出库").tag("OUTBOUND")
-                            Text("盘点").tag("CHECK")
-                        }
-                        .pickerStyle(.segmented)
-                        .onChange(of: orderType) { _, _ in
-                            selectedBatch = inStockBatches.first
-                        }
-                    }
 
                     Section("商品物料与规格") {
                         Button {
