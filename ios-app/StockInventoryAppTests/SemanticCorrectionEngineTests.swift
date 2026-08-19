@@ -61,16 +61,15 @@ final class SemanticCorrectionEngineTests: XCTestCase {
     }
 
     func testPackagingSpecificationInference() {
-        let (spec1, ratio1) = SemanticCorrectionEngine.inferPackagingSpecification(from: "可口可乐 24瓶/箱 330ml")
-        XCTAssertEqual(spec1, "整箱(×24)")
-        XCTAssertEqual(ratio1, 24.0)
+        let spec1 = SemanticCorrectionEngine.inferPackagingSpecification(from: "可口可乐 24瓶/箱 330ml")
+        XCTAssertEqual(spec1?.unitName, "箱")
+        XCTAssertEqual(spec1?.conversionRatio, 24.0)
 
-        let (spec2, ratio2) = SemanticCorrectionEngine.inferPackagingSpecification(from: "精品特级白茶 12盒装 礼盒")
-        XCTAssertEqual(spec2, "礼盒(×12)")
-        XCTAssertEqual(ratio2, 12.0)
+        let spec2 = SemanticCorrectionEngine.inferPackagingSpecification(from: "精品特级白茶 12盒装 礼盒")
+        XCTAssertEqual(spec2?.unitName, "箱")
+        XCTAssertEqual(spec2?.conversionRatio, 12.0)
 
-        let (spec3, ratio3) = SemanticCorrectionEngine.inferPackagingSpecification(from: "普通散装螺栓")
+        let spec3 = SemanticCorrectionEngine.inferPackagingSpecification(from: "普通散装螺栓")
         XCTAssertNil(spec3)
-        XCTAssertNil(ratio3)
     }
 }
