@@ -73,8 +73,21 @@ struct SKUDetailView: View {
                         }
                         ForEach(inventories) { inv in
                             HStack {
-                                Text(inv.locationName)
-                                if let b = inv.batch { Text("· \(b.batchNo)").foregroundColor(.secondary) }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(inv.locationName)
+                                    if let b = inv.batch {
+                                        HStack(spacing: 4) {
+                                            Text(b.batchNo).foregroundColor(.secondary)
+                                            if let sup = b.supplierName, !sup.isEmpty {
+                                                Text("· 供: \(sup)").foregroundColor(.secondary)
+                                            }
+                                            if let p = b.inboundPrice, p > 0 {
+                                                Text("· ¥\(AppFormatters.fmt(p))").foregroundColor(.brand)
+                                            }
+                                        }
+                                        .font(.caption2)
+                                    }
+                                }
                                 Spacer()
                                 Text("\(AppFormatters.fmt(inv.qtyBaseUnit)) \(sku.baseUnit)")
                                     .bold()

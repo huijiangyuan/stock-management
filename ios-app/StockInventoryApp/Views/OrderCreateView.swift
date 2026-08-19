@@ -222,15 +222,48 @@ struct OrderCreateView: View {
                         TextField("库位 / 货架（如 A-01-02）", text: $location)
                     }
 
-                    Section(orderType == "INBOUND" ? "入库批次与保质期" : orderType == "OUTBOUND" ? "批次出库（FIFO 优先）" : "盘点批次选择") {
+                    Section(orderType == "INBOUND" ? "入库批次与供应商" : orderType == "OUTBOUND" ? "批次出库（FIFO 优先）" : "盘点批次选择") {
                         if orderType == "INBOUND" {
-                            TextField("批次号（留空自动生成）", text: $batchNo)
+                            HStack {
+                                Text("批次号")
+                                    .frame(width: 72, alignment: .leading)
+                                    .foregroundColor(.secondary)
+                                TextField("留空自动生成", text: $batchNo)
+                            }
                             DatePicker("生产日期", selection: $productionDate, displayedComponents: .date)
                                 .environment(\.locale, Locale(identifier: "zh_CN"))
                             DatePicker("到期日期", selection: $expirationDate, displayedComponents: .date)
                                 .environment(\.locale, Locale(identifier: "zh_CN"))
-                            TextField("供应商（选填）", text: $supplier)
-                            TextField("入库单价（选填）", text: $inboundPrice).keyboardType(.decimalPad)
+                            HStack {
+                                Text("供应商")
+                                    .frame(width: 72, alignment: .leading)
+                                    .foregroundColor(.secondary)
+                                TextField("如 统一企业 / 雀巢中国（选填）", text: $supplier)
+                            }
+                            HStack {
+                                Text("入库单价")
+                                    .frame(width: 72, alignment: .leading)
+                                    .foregroundColor(.secondary)
+                                TextField("0.00（选填）", text: $inboundPrice)
+                                    .keyboardType(.decimalPad)
+                                if let unit = selectedUnit ?? selectedSKU?.packagingUnits.first {
+                                    Text("元 / \(unit.unitName)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            if let price = Double(inboundPrice), price > 0, let qty = Double(qtyText), qty > 0 {
+                                HStack {
+                                    Text("采购金额估算")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    Text("¥\(AppFormatters.fmt(price * qty)) 元")
+                                        .font(.subheadline.bold())
+                                        .foregroundColor(.brand)
+                                }
+                                .padding(.vertical, 2)
+                            }
                         } else {
                             batchSection
                         }
@@ -714,9 +747,19 @@ struct BatchPickRow: View {
                             .clipShape(Capsule())
                     }
                 }
-                if let exp = batch.expirationDate {
-                    Text("到期 \(AppFormatters.date.string(from: exp))")
-                        .font(.caption2).foregroundColor(.secondary)
+                HStack(spacing: 6) {
+                    if let exp = batch.expirationDate {
+                        Text("到期 \(AppFormatters.date.string(from: exp))")
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                    if let sup = batch.supplierName, !sup.isEmpty {
+                        Text("· 供: \(sup)")
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                    if let p = batch.inboundPrice, p > 0 {
+                        Text("· ¥\(AppFormatters.fmt(p))")
+                            .font(.caption2).foregroundColor(.brand)
+                    }
                 }
             }
             Spacer()

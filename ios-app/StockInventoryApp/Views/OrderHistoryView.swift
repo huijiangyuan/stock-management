@@ -221,11 +221,30 @@ private struct OrderCardSection: View {
                             Text("批次: \(batch.batchNo)")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
+                            if let sup = batch.supplierName, !sup.isEmpty {
+                                Text("· 供应商: \(sup)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            if let price = batch.inboundPrice, price > 0 {
+                                Text("· 单价: ¥\(AppFormatters.fmt(price))")
+                                    .font(.caption2)
+                                    .foregroundColor(.brand)
+                            }
                         }
                         if it.conversionRatio != 1.0, let u = it.unit {
                             Text("(\(AppFormatters.fmt(it.operatingQty)) \(u.unitName) × \(AppFormatters.fmt(it.conversionRatio)))")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
+                        }
+                    }
+
+                    if order.orderType == "INBOUND", let price = it.batch?.inboundPrice, price > 0 {
+                        let totalCost = price * it.operatingQty
+                        HStack {
+                            Text("采购总额: ¥\(AppFormatters.fmt(totalCost)) 元")
+                                .font(.caption2.bold())
+                                .foregroundColor(.brand)
                         }
                     }
 

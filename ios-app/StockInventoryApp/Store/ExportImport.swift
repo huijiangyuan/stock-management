@@ -151,7 +151,7 @@ enum ExportImport {
 
         var csv = "\u{FEFF}" // UTF-8 BOM
         // 表头
-        csv += "单据编号,单据类型,操作时间,商品编码,商品名称,商品品类,操作规格,操作数量,换算系数,基准单位,换算基准总量,批次号,生产日期,到期日期,盘前基准数(盘点),实盘基准数(盘点),盘盈盘亏(盘点),识别模式,备注说明\n"
+        csv += "单据编号,单据类型,操作时间,商品编码,商品名称,商品品类,操作规格,操作数量,换算系数,基准单位,换算基准总量,批次号,供应商,入库单价(元),采购总额(元),生产日期,到期日期,盘前基准数(盘点),实盘基准数(盘点),盘盈盘亏(盘点),识别模式,备注说明\n"
 
         for order in orders {
             let typeLabel = order.orderType == "INBOUND" ? "入库单" : order.orderType == "OUTBOUND" ? "出库单" : "盘点单"
@@ -168,6 +168,9 @@ enum ExportImport {
                 let baseUnit = item.sku?.baseUnit ?? ""
                 let totalBase = AppFormatters.fmt(item.totalBaseQty)
                 let batchNo = item.batch?.batchNo ?? ""
+                let supplierName = item.batch?.supplierName ?? ""
+                let inboundPriceStr = item.batch?.inboundPrice.map { AppFormatters.fmt($0) } ?? ""
+                let totalCostStr = item.batch?.inboundPrice.map { AppFormatters.fmt($0 * item.operatingQty) } ?? ""
                 let prodDate = item.batch?.productionDate.map { dateDf.string(from: $0) } ?? ""
                 let expDate = item.batch?.expirationDate.map { dateDf.string(from: $0) } ?? ""
 
@@ -204,6 +207,9 @@ enum ExportImport {
                     baseUnit,
                     totalBase,
                     batchNo,
+                    supplierName,
+                    inboundPriceStr,
+                    totalCostStr,
                     prodDate,
                     expDate,
                     origQtyStr,

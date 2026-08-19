@@ -48,8 +48,9 @@ final class ExportImportTests: XCTestCase {
     func testExportOrdersCSVProducesValidUTF8BOMFile() throws {
         let sku = RawMaterialSKU(skuCode: "SKU-001", skuName: "测试物料", categoryName: "默认品类", baseUnit: "瓶")
         let unit = PackagingUnit(unitName: "箱", unitType: "LARGE", conversionRatio: 24.0, sku: sku)
+        let batch = StockBatch(batchNo: "BAT-20260819-01", supplierName: "优质供应商A", inboundPrice: 15.5, sku: sku)
         let order = StockOrderHeader(orderNo: "ORD-20260819-01", orderType: "INBOUND")
-        let item = StockOrderItem(operatingQty: 2, conversionRatio: 24.0, totalBaseQty: 48.0, header: order, sku: sku, unit: unit)
+        let item = StockOrderItem(operatingQty: 2, conversionRatio: 24.0, totalBaseQty: 48.0, header: order, sku: sku, unit: unit, batch: batch)
         order.items.append(item)
 
         let url = try ExportImport.exportOrdersCSV(orders: [order], timeRangeTitle: "本月")
@@ -61,6 +62,11 @@ final class ExportImportTests: XCTestCase {
         XCTAssertNotNil(text)
         XCTAssertTrue(text!.starts(with: "\u{FEFF}"))
         XCTAssertTrue(text!.contains("单据编号"))
+        XCTAssertTrue(text!.contains("供应商"))
+        XCTAssertTrue(text!.contains("入库单价(元)"))
+        XCTAssertTrue(text!.contains("优质供应商A"))
+        XCTAssertTrue(text!.contains("15.5"))
+        XCTAssertTrue(text!.contains("31")) // 15.5 * 2
         XCTAssertTrue(text!.contains("ORD-20260819-01"))
         XCTAssertTrue(text!.contains("入库单"))
         XCTAssertTrue(text!.contains("测试物料"))
