@@ -183,7 +183,11 @@ struct SemanticCorrectionEngine {
     static func inferBaseUnit(from text: String) -> String {
         let clean = text.lowercased()
 
-        // 笔类优先（支/根）
+        // 餐饮快餐套餐优先（份）
+        if clean.contains("汉堡") || clean.contains("炸鸡") || clean.contains("套餐") || clean.contains("德克士") || clean.contains("快餐") || clean.contains("外卖") {
+            return "份"
+        }
+        // 笔类优先（支）
         if clean.contains("笔") || clean.contains("水笔") || clean.contains("签字笔") || clean.contains("中性笔") || clean.contains("圆珠笔") {
             return "支"
         }
@@ -223,14 +227,11 @@ struct SemanticCorrectionEngine {
         if clean.contains("双") || clean.contains("鞋") || clean.contains("手套") {
             return "双"
         }
-        if clean.contains("副") || clean.contains("套") || clean.contains("具") {
+        if clean.contains("副") || clean.contains("套件") || clean.contains("套装") || clean.contains("配套") || clean.contains("具") {
             return "套"
         }
         if clean.contains("台") || clean.contains("机") || clean.contains("泵") {
             return "台"
-        }
-        if clean.contains("汉堡") || clean.contains("炸鸡") || clean.contains("套餐") || clean.contains("德克士") || clean.contains("快餐") {
-            return "份"
         }
         if clean.contains("螺") || clean.contains("轴承") || clean.contains("垫") || clean.contains("销") || clean.contains("阀") || clean.contains("芯片") || clean.contains("电机") {
             return "个"
