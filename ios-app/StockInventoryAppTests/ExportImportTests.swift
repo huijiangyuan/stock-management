@@ -66,4 +66,36 @@ final class ExportImportTests: XCTestCase {
         XCTAssertTrue(text!.contains("测试物料"))
         XCTAssertTrue(text!.contains("48"))
     }
+
+    func testDateFormattersProducePureChineseNumericDate() {
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 8
+        components.day = 19
+        components.hour = 14
+        components.minute = 30
+        let calendar = Calendar(identifier: .gregorian)
+        guard let testDate = calendar.date(from: components) else {
+            XCTFail("无法构造测试日期")
+            return
+        }
+
+        let dateStr = AppFormatters.date.string(from: testDate)
+        XCTAssertEqual(dateStr, "2026-08-19")
+        // 确保不包含任何英文月份简写
+        let englishMonths = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        for m in englishMonths {
+            XCTAssertFalse(dateStr.contains(m), "日期不应包含英文月份 \(m)")
+        }
+
+        let chineseDateStr = AppFormatters.chineseDate.string(from: testDate)
+        XCTAssertEqual(chineseDateStr, "2026年08月19日")
+
+        let dateTimeStr = AppFormatters.dateTime.string(from: testDate)
+        XCTAssertEqual(dateTimeStr, "2026-08-19 14:30")
+
+        XCTAssertEqual(AppFormatters.formatDate(nil), "—")
+        XCTAssertEqual(AppFormatters.formatDateTime(nil), "—")
+        XCTAssertEqual(AppFormatters.formatChineseDate(nil), "—")
+    }
 }

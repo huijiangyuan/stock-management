@@ -142,8 +142,12 @@ enum ExportImport {
     static func exportOrdersCSV(orders: [StockOrderHeader], timeRangeTitle: String = "全部") throws -> URL {
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        df.locale = Locale(identifier: "zh_CN")
+        df.calendar = Calendar(identifier: .gregorian)
         let dateDf = DateFormatter()
         dateDf.dateFormat = "yyyy-MM-dd"
+        dateDf.locale = Locale(identifier: "zh_CN")
+        dateDf.calendar = Calendar(identifier: .gregorian)
 
         var csv = "\u{FEFF}" // UTF-8 BOM
         // 表头
@@ -326,6 +330,10 @@ enum ExportImport {
     }
 
     private static func stamp() -> String {
-        let df = DateFormatter(); df.dateFormat = "yyyyMMddHHmmss"; return df.string(from: Date())
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMddHHmmss"
+        df.locale = Locale(identifier: "zh_CN")
+        df.calendar = Calendar(identifier: .gregorian)
+        return df.string(from: Date())
     }
 }

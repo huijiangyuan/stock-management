@@ -13,6 +13,7 @@ struct StockInventoryAppApp: App {
         WindowGroup {
             MainTabView()
                 .modelContainer(container)
+                .environment(\.locale, Locale(identifier: "zh_CN"))
         }
     }
 }

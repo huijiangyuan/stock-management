@@ -226,7 +226,9 @@ struct OrderCreateView: View {
                         if orderType == "INBOUND" {
                             TextField("批次号（留空自动生成）", text: $batchNo)
                             DatePicker("生产日期", selection: $productionDate, displayedComponents: .date)
+                                .environment(\.locale, Locale(identifier: "zh_CN"))
                             DatePicker("到期日期", selection: $expirationDate, displayedComponents: .date)
+                                .environment(\.locale, Locale(identifier: "zh_CN"))
                             TextField("供应商（选填）", text: $supplier)
                             TextField("入库单价（选填）", text: $inboundPrice).keyboardType(.decimalPad)
                         } else {
@@ -684,7 +686,10 @@ struct OrderCreateView: View {
     }
 
     static func autoBatchNo(_ sku: RawMaterialSKU) -> String {
-        let df = DateFormatter(); df.dateFormat = "yyyyMMdd"
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd"
+        df.locale = Locale(identifier: "zh_CN")
+        df.calendar = Calendar(identifier: .gregorian)
         let r = Int.random(in: 1...99)
         return "\(sku.skuCode)-\(df.string(from: Date()))-\(String(format: "%02d", r))"
     }

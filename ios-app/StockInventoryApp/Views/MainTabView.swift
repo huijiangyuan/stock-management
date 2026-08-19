@@ -14,6 +14,7 @@ struct MainTabView: View {
         }
         .accentColor(.brand)
         .preferredColorScheme(.dark)
+        .environment(\.locale, Locale(identifier: "zh_CN"))
         .withToastOverlay()
     }
 }
