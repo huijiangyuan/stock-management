@@ -91,23 +91,24 @@ struct SemanticCorrectionEngine {
                 "蔬菜", "水果", "苹果", "香蕉", "番茄", "鸡蛋", "面包", "吐司", "蛋糕", "饼干",
                 "燕麦", "大米", "面粉", "挂面", "方便面", "零食", "糖果", "巧克力", "坚果", "冷冻食品",
                 "酱油", "食用油", "花生油", "香油", "调味", "火锅底料", "番茄酱", "沙拉酱", "德克士",
-                "肯德基", "麦当劳", "海底捞", "汉堡王", "塔斯汀", "双汇", "金锣", "达利园", "徐福记"
+                "肯德基", "麦当劳", "海底捞", "汉堡王", "塔斯汀", "双汇", "金锣", "达利园", "徐福记",
+                "快餐", "餐饮", "西式", "中式", "外卖", "美食"
             ]),
             ("酒水饮料", [
                 "可乐", "可口可乐", "百事可乐", "雪碧", "芬达", "汽水", "苏打水", "矿泉水", "饮用水",
                 "纯净水", "农夫山泉", "娃哈哈", "果汁", "橙汁", "椰汁", "椰树", "牛奶", "纯牛奶",
                 "酸奶", "伊利", "蒙牛", "光明", "咖啡", "拿铁", "美式", "雀巢", "星巴克", "茶叶",
-                "绿茶", "红茶", "乌龙茶", "奶茶", "元气森林", "喜茶", "啤酒", "白酒", "红酒", "饮料"
+                "绿茶", "红茶", "乌龙茶", "奶茶", "元气森林", "喜茶", "啤酒", "白酒", "红酒", "饮料", "酒水"
             ]),
             ("日用百货", [
                 "纸巾", "抽纸", "卷纸", "湿巾", "手帕纸", "洗手液", "洗洁精", "洗衣液", "洗衣粉",
                 "肥皂", "香皂", "洗发水", "沐浴露", "牙膏", "牙刷", "毛巾", "抹布", "垃圾袋",
-                "保鲜膜", "保鲜袋", "一次性纸杯", "一次性手套", "纸杯", "拖把", "扫把", "日用", "百货"
+                "保鲜膜", "保鲜袋", "一次性纸杯", "一次性手套", "纸杯", "拖把", "扫把", "日用", "百货", "日化"
             ]),
             ("办公耗材", [
-                "打印纸", "复印纸", "a4纸", "a3纸", "签字笔", "圆珠笔", "中性笔", "记号笔", "荧光笔",
+                "打印纸", "复印纸", "a4纸", "a3纸", "签字笔", "圆珠笔", "中性笔", "水笔", "记号笔", "荧光笔",
                 "订书机", "订书针", "文件夹", "资料册", "档案袋", "橡皮", "剪刀", "美工刀", "计算器",
-                "墨盒", "硒鼓", "碳粉", "标签纸", "热敏纸", "便签", "记事本", "文具", "办公"
+                "墨盒", "硒鼓", "碳粉", "标签纸", "热敏纸", "便签", "记事本", "文具", "办公", "耗材"
             ]),
             ("五金配件", [
                 "螺栓", "螺丝", "螺母", "螺钉", "垫圈", "垫片", "轴承", "弹簧", "销轴", "卡簧",
@@ -117,30 +118,30 @@ struct SemanticCorrectionEngine {
             ("金属材料", [
                 "铜管", "紫铜", "黄铜", "铜排", "钢管", "不锈钢", "铝合金", "铝型材", "型材",
                 "板材", "圆钢", "方管", "镀锌", "冷轧", "热轧", "碳钢", "角钢", "槽钢", "工字钢",
-                "钢丝", "金属", "钢板", "铝板"
+                "钢丝", "金属", "钢板", "铝板", "管材", "管件"
             ]),
             ("机械传动", [
                 "齿轮", "皮带", "同步带", "三角带", "链条", "链轮", "联轴器", "减速机", "减速电机",
                 "步进电机", "伺服电机", "电机", "马达", "气缸", "气动接头", "电磁阀", "水泵", "风机",
-                "接近开关", "限位开关", "机械"
+                "接近开关", "限位开关", "机械", "传动"
             ]),
             ("包装耗材", [
                 "纸箱", "瓦楞", "编织袋", "胶带", "封箱胶", "缠绕膜", "拉伸膜", "气泡膜", "气泡袋",
-                "托盘", "包装袋", "泡沫箱", "珍珠棉", "打包带", "木箱", "塑料托盘", "耗材", "包装"
+                "托盘", "包装袋", "泡沫箱", "珍珠棉", "打包带", "木箱", "塑料托盘", "包装"
             ]),
             ("化工辅料", [
                 "润滑", "机油", "黄油", "润滑脂", "清洗剂", "脱脂剂", "防锈剂", "防锈油", "密封胶",
                 "硅酮胶", "玻璃胶", "ab胶", "502", "树脂", "胶水", "涂料", "油漆", "固化剂",
-                "稀释剂", "化工", "硅脂", "脱模剂"
+                "稀释剂", "化工", "硅脂", "脱模剂", "辅料"
             ]),
             ("电子数码", [
                 "芯片", "电阻", "电容", "二极管", "三极管", "电感", "晶振", "继电器", "传感器",
                 "开关", "接线端子", "插头", "插座", "电源", "适配器", "电缆", "电线", "电路板",
-                "pcb", "电池", "保险丝", "元器件", "电子"
+                "pcb", "电池", "保险丝", "元器件", "电子", "数码"
             ]),
             ("劳保用品", [
                 "安全帽", "劳保手套", "防割手套", "防护服", "护目镜", "防护面罩", "防尘口罩",
-                "n95", "反光背心", "安全带", "绝缘鞋", "劳保鞋", "耳塞", "防护", "劳保"
+                "n95", "反光背心", "安全带", "绝缘鞋", "劳保鞋", "耳塞", "防护", "劳保", "劳保用品"
             ])
         ]
 
@@ -154,7 +155,10 @@ struct SemanticCorrectionEngine {
             }
 
             for rule in categoryRules {
-                let matchedRuleCategory = rule.category == cleanExisting || cleanExisting.contains(rule.category) || rule.keywords.contains(where: { cleanExisting.lowercased().contains($0) })
+                let matchedRuleCategory = rule.category == cleanExisting
+                    || cleanExisting.contains(rule.category)
+                    || rule.category.contains(cleanExisting)
+                    || rule.keywords.contains(where: { cleanExisting.lowercased().contains($0) || $0.contains(cleanExisting.lowercased()) })
                 if matchedRuleCategory {
                     if rule.keywords.contains(where: { clean.contains($0.lowercased()) }) {
                         return cleanExisting
@@ -178,22 +182,27 @@ struct SemanticCorrectionEngine {
     /// 依据品名形态推断常见基准计量单位（有必填，能推断就填）
     static func inferBaseUnit(from text: String) -> String {
         let clean = text.lowercased()
+
+        // 笔类优先（支/根）
+        if clean.contains("笔") || clean.contains("水笔") || clean.contains("签字笔") || clean.contains("中性笔") || clean.contains("圆珠笔") {
+            return "支"
+        }
         if clean.contains("听") {
             return "听"
         }
         if clean.contains("罐") {
             return "罐"
         }
-        if clean.contains("瓶") || clean.contains("水") || clean.contains("可乐") || clean.contains("饮料") || clean.contains("奶") || clean.contains("雪碧") {
+        if clean.contains("瓶") || clean.contains("矿泉水") || clean.contains("纯净水") || clean.contains("饮用水") || clean.contains("苏打水") || clean.contains("可乐") || clean.contains("饮料") || clean.contains("牛奶") || clean.contains("雪碧") {
             return "瓶"
         }
-        if clean.contains("管") || clean.contains("型材") || clean.contains("轴") || clean.contains("棒") || clean.contains("笔") || clean.contains("胶条") {
+        if clean.contains("管") || clean.contains("型材") || clean.contains("轴") || clean.contains("棒") || clean.contains("胶条") {
             return "根"
         }
         if clean.contains("板") || clean.contains("片") || clean.contains("纸") || clean.contains("膜") {
             return "张"
         }
-        if clean.contains("桶") || clean.contains("油") || clean.contains("漆") || clean.contains("乳胶") || clean.contains("脂") {
+        if clean.contains("桶") || clean.contains("机油") || clean.contains("油漆") || clean.contains("乳胶") || clean.contains("润滑油") || clean.contains("黄油") {
             return "桶"
         }
         if clean.contains("箱") {

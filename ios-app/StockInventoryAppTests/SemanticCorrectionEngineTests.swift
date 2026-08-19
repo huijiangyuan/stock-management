@@ -70,7 +70,7 @@ final class SemanticCorrectionEngineTests: XCTestCase {
         XCTAssertEqual(SemanticCorrectionEngine.inferBaseUnit(from: "矿泉水饮料"), "瓶")
         XCTAssertEqual(SemanticCorrectionEngine.inferBaseUnit(from: "330ml听装可乐"), "听")
         XCTAssertEqual(SemanticCorrectionEngine.inferBaseUnit(from: "八宝粥罐装"), "罐")
-        XCTAssertEqual(SemanticCorrectionEngine.inferBaseUnit(from: "中性水笔"), "根")
+        XCTAssertEqual(SemanticCorrectionEngine.inferBaseUnit(from: "中性水笔"), "支")
     }
 
     func testShelfLifeStrictInferenceDoesNotGuessWhenMissing() {
