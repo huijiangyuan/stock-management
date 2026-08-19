@@ -6,7 +6,7 @@ import SwiftData
 /// 盘点单高亮展示盘盈盘亏差异，支持一键导出完整 CSV 数据报表。
 struct OrderHistoryView: View {
     @Query(sort: \StockOrderHeader.createdAt, order: .reverse) private var orders: [StockOrderHeader]
-    @State private var timeRange: TimeRangePreset = .thisMonth
+    @State private var timeRange: TimeRangePreset = .today
     @State private var selectedType: OrderTypeFilter = .all
     @State private var search = ""
     @State private var exportURL: URL?
@@ -15,9 +15,9 @@ struct OrderHistoryView: View {
     @State private var exportErrorMessage = ""
 
     enum TimeRangePreset: String, CaseIterable, Identifiable {
-        case thisMonth = "本月"
-        case thisWeek = "本周"
         case today = "今日"
+        case thisWeek = "本周"
+        case thisMonth = "本月"
         case thisQuarter = "本季度"
         case thisYear = "本年"
         case all = "全部"
