@@ -201,3 +201,5 @@ struct SKUCatalogRow: View {
         .padding(.vertical, 4)
     }
 }
+
+typealias SKURow = SKUCatalogRow

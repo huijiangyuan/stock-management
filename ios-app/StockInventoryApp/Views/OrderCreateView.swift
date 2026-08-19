@@ -746,7 +746,7 @@ struct SKUPickerSheet: View {
                     search.isEmpty || $0.skuName.localizedCaseInsensitiveContains(search)
                         || $0.skuCode.localizedCaseInsensitiveContains(search)
                 }) { sku in
-                    Button { selected = sku; dismiss() } label: { SKURow(sku: sku) }
+                    Button { selected = sku; dismiss() } label: { SKUCatalogRow(sku: sku) }
                 }
             }
             .searchable(text: $search, prompt: "搜索名称或编码")
