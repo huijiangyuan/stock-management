@@ -48,8 +48,8 @@ final class ExportImportTests: XCTestCase {
     func testExportOrdersCSVProducesValidUTF8BOMFile() throws {
         let sku = RawMaterialSKU(skuCode: "SKU-001", skuName: "测试物料", categoryName: "默认品类", baseUnit: "瓶")
         let unit = PackagingUnit(unitName: "箱", unitType: "LARGE", conversionRatio: 24.0, sku: sku)
-        let order = StockOrderHeader(orderNo: "ORD-20260819-01", orderType: "INBOUND", locationName: "A-01")
-        let item = StockOrderItem(order: order, sku: sku, unit: unit, operatingQty: 2, conversionRatio: 24.0, totalBaseQty: 48.0)
+        let order = StockOrderHeader(orderNo: "ORD-20260819-01", orderType: "INBOUND")
+        let item = StockOrderItem(operatingQty: 2, conversionRatio: 24.0, totalBaseQty: 48.0, header: order, sku: sku, unit: unit)
         order.items.append(item)
 
         let url = try ExportImport.exportOrdersCSV(orders: [order], timeRangeTitle: "本月")
