@@ -7,6 +7,7 @@ struct DashboardView: View {
 
     @State private var expiring: [(RawMaterialSKU, StockBatch, Int, Double)] = []
     @State private var outOfStock: [RawMaterialSKU] = []
+    @State private var valuation = InventoryStore.StockValuationSummary(totalValue: 0, valuedSKUCount: 0, totalSKUCount: 0, totalItemCount: 0, topValuedItems: [])
     @State private var showOrder: DashOrderPreset? = nil
 
     enum DashOrderPreset: Identifiable {
@@ -30,12 +31,85 @@ struct DashboardView: View {
                                    message: "\(outOfStock.count) 种商品已缺货，请及时补货")
                     }
 
+                    // ── 货物价值估算总览 ─────────────────────────────
+                    AppCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Label("货物价值估算", systemImage: "yensign.circle.fill")
+                                    .font(.subheadline.bold())
+                                    .foregroundColor(.brand)
+                                Spacer()
+                                Text("实时在库")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.surface)
+                                    .clipShape(Capsule())
+                            }
+
+                            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                Text("¥")
+                                    .font(.title2.bold())
+                                    .foregroundColor(.brand)
+                                Text(AppFormatters.fmt(valuation.totalValue))
+                                    .font(.system(size: 30, weight: .heavy, design: .rounded))
+                                    .foregroundColor(.primary)
+                                Text("元")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Divider()
+
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("在库总件数")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                    Text("\(AppFormatters.fmt(valuation.totalItemCount))")
+                                        .font(.subheadline.bold())
+                                }
+                                Spacer()
+                                VStack(alignment: .center, spacing: 2) {
+                                    Text("已定价物料")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                    Text("\(valuation.valuedSKUCount) / \(valuation.totalSKUCount) 种")
+                                        .font(.subheadline.bold())
+                                }
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text("已建档物料")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                    Text("\(skus.count) 种")
+                                        .font(.subheadline.bold())
+                                }
+                            }
+
+                            if valuation.totalSKUCount > 0 && valuation.valuedSKUCount < valuation.totalSKUCount {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "info.circle")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                    Text("注：部分商品未填入库单价，入库时登记单价可精准核算总值")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(.top, 2)
+                            }
+                        }
+                    }
+
+                    // ── 快捷出入库操作 ─────────────────────────────
                     HStack(spacing: 10) {
                         quickAction("入库", .success, "arrow.down.doc.fill") { showOrder = .inbound }
                         quickAction("出库", .brand, "arrow.up.doc.fill") { showOrder = .outbound }
                         quickAction("盘点", .warning, "checklist") { showOrder = .check }
                     }
 
+                    // ── 核心指标卡 ─────────────────────────────────
                     AppCard {
                         HStack {
                             stat("商品物料", "\(skus.count)")
@@ -43,6 +117,37 @@ struct DashboardView: View {
                             stat("临期", "\(expiring.count)")
                             Divider()
                             stat("缺货", "\(outOfStock.count)")
+                        }
+                    }
+
+                    // ── 高价值货物排行 ─────────────────────────────
+                    if !valuation.topValuedItems.isEmpty {
+                        AppCard {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Label("高货值商品分布", systemImage: "chart.bar.fill")
+                                        .font(.headline)
+                                    Spacer()
+                                }
+                                ForEach(valuation.topValuedItems, id: \.sku.skuId) { item in
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.sku.skuName)
+                                                .font(.subheadline.bold())
+                                            Text("库存: \(AppFormatters.fmt(item.qty)) \(item.sku.baseUnit)")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        Spacer()
+                                        Text("¥\(AppFormatters.fmt(item.value))")
+                                            .font(.subheadline.bold())
+                                            .foregroundColor(.brand)
+                                    }
+                                    if item.sku.skuId != valuation.topValuedItems.last?.sku.skuId {
+                                        Divider()
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -82,6 +187,7 @@ struct DashboardView: View {
         let store = InventoryStore(context: ctx)
         expiring = store.expiringSoon(withinDays: 3)
         outOfStock = store.outOfStock()
+        valuation = store.calculateTotalValuation()
     }
 
     private func quickAction(_ title: String, _ color: Color, _ icon: String, _ action: @escaping () -> Void) -> some View {

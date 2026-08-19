@@ -206,4 +206,66 @@ final class InventoryStore {
             return "\(AppFormatters.fmt(totalBaseQty)) \(sku.baseUnit)"
         }
     }
+
+    // MARK: - 货物价值估算 (Stock Valuation)
+
+    struct StockValuationSummary {
+        let totalValue: Double         // 估算总价值（元）
+        let valuedSKUCount: Int        // 已定价商品种类数
+        let totalSKUCount: Int         // 在库商品种类数
+        let totalItemCount: Double     // 在库商品总件数（基准单位）
+        let topValuedItems: [(sku: RawMaterialSKU, value: Double, qty: Double)] // 高价值商品排行
+    }
+
+    /// 计算当前在库所有货物的估算总价值
+    func calculateTotalValuation() -> StockValuationSummary {
+        let descriptor = FetchDescriptor<StockInventory>(predicate: #Predicate { $0.qtyBaseUnit > 0 })
+        guard let invs = try? context.fetch(descriptor) else {
+            return StockValuationSummary(totalValue: 0, valuedSKUCount: 0, totalSKUCount: 0, totalItemCount: 0, topValuedItems: [])
+        }
+
+        var totalVal = 0.0
+        var totalQtyCount = 0.0
+        var skuValueMap: [String: (sku: RawMaterialSKU, value: Double, qty: Double)] = [:]
+        var valuedSKUs = Set<String>()
+        var allInStockSKUs = Set<String>()
+
+        for inv in invs {
+            guard let sku = inv.sku else { continue }
+            allInStockSKUs.insert(sku.skuId)
+            totalQtyCount += inv.qtyBaseUnit
+
+            // 优先使用当前批次的入库单价
+            var unitPrice = inv.batch?.inboundPrice
+            // 若当前批次未记录单价，则回退到该 SKU 其他批次最新的有效单价
+            if unitPrice == nil || unitPrice! <= 0 {
+                unitPrice = sku.batches.sorted { $0.createdAt > $1.createdAt }.compactMap { $0.inboundPrice }.first(where: { $0 > 0 })
+            }
+
+            let price = unitPrice ?? 0
+            if price > 0 {
+                valuedSKUs.insert(sku.skuId)
+            }
+            let itemVal = inv.qtyBaseUnit * price
+            totalVal += itemVal
+
+            var entry = skuValueMap[sku.skuId] ?? (sku: sku, value: 0, qty: 0)
+            entry.value += itemVal
+            entry.qty += inv.qtyBaseUnit
+            skuValueMap[sku.skuId] = entry
+        }
+
+        let topItems = skuValueMap.values
+            .filter { $0.value > 0 }
+            .sorted { $0.value > $1.value }
+            .prefix(5)
+
+        return StockValuationSummary(
+            totalValue: totalVal,
+            valuedSKUCount: valuedSKUs.count,
+            totalSKUCount: allInStockSKUs.count,
+            totalItemCount: totalQtyCount,
+            topValuedItems: Array(topItems)
+        )
+    }
 }
