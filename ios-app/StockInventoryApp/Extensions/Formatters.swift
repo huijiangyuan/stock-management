@@ -7,7 +7,6 @@ enum AppFormatters {
         f.dateFormat = "yyyy-MM-dd"
         f.locale = Locale(identifier: "zh_CN")
         f.calendar = Calendar(identifier: .gregorian)
-        f.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
         return f
     }()
 
@@ -17,7 +16,6 @@ enum AppFormatters {
         f.dateFormat = "yyyy年MM月dd日"
         f.locale = Locale(identifier: "zh_CN")
         f.calendar = Calendar(identifier: .gregorian)
-        f.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
         return f
     }()
 
@@ -27,7 +25,6 @@ enum AppFormatters {
         f.dateFormat = "yyyy-MM-dd HH:mm"
         f.locale = Locale(identifier: "zh_CN")
         f.calendar = Calendar(identifier: .gregorian)
-        f.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
         return f
     }()
 

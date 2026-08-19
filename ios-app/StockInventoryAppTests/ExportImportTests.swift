@@ -68,13 +68,14 @@ final class ExportImportTests: XCTestCase {
     }
 
     func testDateFormattersProducePureChineseNumericDate() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = AppFormatters.dateTime.timeZone
         var components = DateComponents()
         components.year = 2026
         components.month = 8
         components.day = 19
         components.hour = 14
         components.minute = 30
-        let calendar = Calendar(identifier: .gregorian)
         guard let testDate = calendar.date(from: components) else {
             XCTFail("无法构造测试日期")
             return
