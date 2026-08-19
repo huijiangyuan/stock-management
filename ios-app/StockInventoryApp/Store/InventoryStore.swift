@@ -27,10 +27,12 @@ final class InventoryStore {
     @discardableResult
     func processOrder(type: String,
                       lines: [OrderLine],
-                      location: String = "默认货位",
+                      location: String = "默认仓库",
                       remark: String? = nil) throws -> StockOrderHeader {
         let header = StockOrderHeader(orderNo: Self.makeOrderNo(type: type),
-                                      orderType: type, remark: remark)
+                                      orderType: type,
+                                      locationName: location,
+                                      remark: remark)
         context.insert(header)
 
         for line in lines {
@@ -114,13 +116,14 @@ final class InventoryStore {
 
     // MARK: - 临期预警（打开 App 时扫描）
 
-    func expiringSoon(withinDays: Int = 3) -> [(sku: RawMaterialSKU, batch: StockBatch, daysLeft: Int, qty: Double)] {
+    func expiringSoon(withinDays: Int = 3, location: String? = nil) -> [(sku: RawMaterialSKU, batch: StockBatch, daysLeft: Int, qty: Double)] {
         let now = Date()
         let cal = Calendar.current
         var result: [(RawMaterialSKU, StockBatch, Int, Double)] = []
         let descriptor = FetchDescriptor<StockInventory>(predicate: #Predicate { $0.qtyBaseUnit > 0 })
         guard let invs = try? context.fetch(descriptor) else { return result }
         for inv in invs {
+            if let loc = location, !loc.isEmpty, inv.locationName != loc { continue }
             guard let batch = inv.batch, let exp = batch.expirationDate, let sku = inv.sku else { continue }
             let days = cal.dateComponents([.day], from: now, to: exp).day ?? 0
             if days <= withinDays {
@@ -132,20 +135,23 @@ final class InventoryStore {
 
     // MARK: - 低库存预警
 
-    func lowStock(thresholdFor: (RawMaterialSKU) -> Double) -> [(sku: RawMaterialSKU, qty: Double)] {
+    func lowStock(thresholdFor: (RawMaterialSKU) -> Double, location: String? = nil) -> [(sku: RawMaterialSKU, qty: Double)] {
         let descriptor = FetchDescriptor<RawMaterialSKU>()
         guard let skus = try? context.fetch(descriptor) else { return [] }
         return skus.compactMap { sku in
-            let qty = totalQty(sku: sku)
+            let qty = totalQty(location: location, sku: sku)
             return qty < thresholdFor(sku) ? (sku, qty) : nil
         }
     }
 
     /// 缺货：存在库存记录但剩余为 0 的 SKU
-    func outOfStock() -> [RawMaterialSKU] {
+    func outOfStock(location: String? = nil) -> [RawMaterialSKU] {
         let descriptor = FetchDescriptor<StockInventory>(predicate: #Predicate { $0.qtyBaseUnit == 0 })
         guard let invs = try? context.fetch(descriptor) else { return [] }
-        return Array(Set(invs.compactMap { $0.sku }))
+        let filtered = invs.filter { inv in
+            location == nil || location!.isEmpty || inv.locationName == location!
+        }
+        return Array(Set(filtered.compactMap { $0.sku }))
     }
 
     // MARK: - 单据号生成
@@ -217,8 +223,8 @@ final class InventoryStore {
         let topValuedItems: [(sku: RawMaterialSKU, value: Double, qty: Double)] // 高价值商品排行
     }
 
-    /// 计算当前在库所有货物的估算总价值
-    func calculateTotalValuation() -> StockValuationSummary {
+    /// 计算当前在库所有货物的估算总价值（支持按仓库筛选）
+    func calculateTotalValuation(location: String? = nil) -> StockValuationSummary {
         let descriptor = FetchDescriptor<StockInventory>(predicate: #Predicate { $0.qtyBaseUnit > 0 })
         guard let invs = try? context.fetch(descriptor) else {
             return StockValuationSummary(totalValue: 0, valuedSKUCount: 0, totalSKUCount: 0, totalItemCount: 0, topValuedItems: [])
@@ -231,6 +237,9 @@ final class InventoryStore {
         var allInStockSKUs = Set<String>()
 
         for inv in invs {
+            if let loc = location, !loc.isEmpty, inv.locationName != loc {
+                continue
+            }
             guard let sku = inv.sku else { continue }
             allInStockSKUs.insert(sku.skuId)
             totalQtyCount += inv.qtyBaseUnit
@@ -267,5 +276,28 @@ final class InventoryStore {
             totalItemCount: totalQtyCount,
             topValuedItems: Array(topItems)
         )
+    }
+
+    // MARK: - 仓库管理与级联清理 (Warehouse Management)
+
+    /// 删除指定仓库并级联清理该仓库的全部库存台账和出入库/盘点单据记录
+    func deleteWarehouse(name: String) throws {
+        // 1. 删除对应仓库的库存记录 StockInventory
+        let invDescriptor = FetchDescriptor<StockInventory>()
+        if let invs = try? context.fetch(invDescriptor) {
+            for inv in invs where inv.locationName == name {
+                context.delete(inv)
+            }
+        }
+
+        // 2. 删除对应仓库的单据记录 StockOrderHeader（items 级联删除）
+        let orderDescriptor = FetchDescriptor<StockOrderHeader>()
+        if let orders = try? context.fetch(orderDescriptor) {
+            for order in orders where (order.locationName == name || (order.locationName == nil && (name == "默认仓库" || name == "默认货位"))) {
+                context.delete(order)
+            }
+        }
+
+        try context.save()
     }
 }

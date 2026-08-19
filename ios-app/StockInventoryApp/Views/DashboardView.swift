@@ -9,6 +9,8 @@ struct DashboardView: View {
     @State private var outOfStock: [RawMaterialSKU] = []
     @State private var valuation = InventoryStore.StockValuationSummary(totalValue: 0, valuedSKUCount: 0, totalSKUCount: 0, totalItemCount: 0, topValuedItems: [])
     @State private var showOrder: DashOrderPreset? = nil
+    @State private var showWarehousePicker = false
+    @State private var warehouseStore = WarehouseStore.shared
 
     enum DashOrderPreset: Identifiable {
         case inbound, outbound, check
@@ -39,12 +41,12 @@ struct DashboardView: View {
                                     .font(.subheadline.bold())
                                     .foregroundColor(.brand)
                                 Spacer()
-                                Text("实时在库")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.surface)
+                                Text(warehouseStore.currentWarehouse)
+                                    .font(.caption2.bold())
+                                    .foregroundColor(.brand)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.brand.opacity(0.12))
                                     .clipShape(Capsule())
                             }
 
@@ -178,16 +180,45 @@ struct DashboardView: View {
                 .padding(14)
             }
             .navigationTitle("库存总览")
-            .sheet(item: $showOrder) { p in OrderCreateView(presetType: p.type) }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showWarehousePicker = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "building.2.crop.circle.fill")
+                                .font(.subheadline)
+                            Text(warehouseStore.currentWarehouse)
+                                .font(.subheadline.bold())
+                            Image(systemName: "chevron.down")
+                                .font(.caption2.bold())
+                        }
+                        .foregroundColor(.brand)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.brand.opacity(0.1))
+                        .clipShape(Capsule())
+                    }
+                }
+            }
+            .sheet(item: $showOrder) { p in
+                OrderCreateView(presetType: p.type, presetLocation: warehouseStore.currentWarehouse)
+            }
+            .sheet(isPresented: $showWarehousePicker) {
+                WarehousePickerSheet {
+                    refresh()
+                }
+            }
             .onAppear(perform: refresh)
         }
     }
 
     private func refresh() {
         let store = InventoryStore(context: ctx)
-        expiring = store.expiringSoon(withinDays: 3)
-        outOfStock = store.outOfStock()
-        valuation = store.calculateTotalValuation()
+        let loc = warehouseStore.currentWarehouse
+        expiring = store.expiringSoon(withinDays: 3, location: loc)
+        outOfStock = store.outOfStock(location: loc)
+        valuation = store.calculateTotalValuation(location: loc)
     }
 
     private func quickAction(_ title: String, _ color: Color, _ icon: String, _ action: @escaping () -> Void) -> some View {

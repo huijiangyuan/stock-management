@@ -299,6 +299,11 @@ private struct OrderCardSection: View {
             HStack {
                 Label(order.orderNo, systemImage: typeIcon)
                     .font(.caption.bold())
+                if let loc = order.locationName, !loc.isEmpty {
+                    Text("· \(loc)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
                 Spacer()
                 Text(AppFormatters.dateTime.string(from: order.createdAt))
                     .font(.caption2)

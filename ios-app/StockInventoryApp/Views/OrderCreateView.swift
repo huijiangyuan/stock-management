@@ -61,12 +61,13 @@ struct OrderCreateView: View {
     @State private var pendingBatch: StockBatch? = nil
     @State private var fifoOverrideNote: String? = nil
 
-    init(presetSKU: RawMaterialSKU? = nil, presetType: String = "INBOUND") {
+    init(presetSKU: RawMaterialSKU? = nil, presetType: String = "INBOUND", presetLocation: String? = nil) {
         self.presetSKU = presetSKU
         self.presetType = presetType
         _orderType = State(initialValue: presetType)
         _selectedSKU = State(initialValue: presetSKU)
         _selectedUnit = State(initialValue: presetSKU?.packagingUnits.first)
+        _location = State(initialValue: presetLocation ?? WarehouseStore.shared.currentWarehouse)
     }
 
     private var totalBase: Double {
