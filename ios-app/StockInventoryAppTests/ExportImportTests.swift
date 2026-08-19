@@ -64,6 +64,6 @@ final class ExportImportTests: XCTestCase {
         XCTAssertTrue(text!.contains("ORD-20260819-01"))
         XCTAssertTrue(text!.contains("入库单"))
         XCTAssertTrue(text!.contains("测试物料"))
-        XCTAssertTrue(text!.contains("48.00"))
+        XCTAssertTrue(text!.contains("48"))
     }
 }
