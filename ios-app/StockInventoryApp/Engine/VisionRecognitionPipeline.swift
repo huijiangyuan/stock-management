@@ -1,6 +1,7 @@
 import Foundation
 import os
 import SwiftData
+import UIKit
 
 /// 单次拍照识别流水线：规范化图片 → OCR 识字与 MobileCLIP 向量 → 多模态交叉验证 → MiniCPM/云端兜底。
 /// 整个编排限定在 MainActor，耗时图片、OCR 与 Core ML 操作分别由 actor 串行执行。
