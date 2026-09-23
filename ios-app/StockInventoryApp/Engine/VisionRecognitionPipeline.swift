@@ -9,6 +9,7 @@ final class VisionRecognitionPipeline {
     typealias Fallback = @MainActor (Data, String?) async -> (RecognitionResult, VisionRecognitionSource)
 
     private let imageProcessor: any CapturedImageProcessing
+    private let objectDetector: any ObjectDetectorProviding
     private let embeddingEngine: any ImageEmbeddingProviding
     private let ocrEngine: any VisionOCRProviding
     private let featureRepository: any FeatureSearching
@@ -20,6 +21,7 @@ final class VisionRecognitionPipeline {
     init(
         context: ModelContext,
         imageProcessor: any CapturedImageProcessing = CapturedImageProcessor.shared,
+        objectDetector: any ObjectDetectorProviding = ObjectDetectionEngine.shared,
         embeddingEngine: any ImageEmbeddingProviding = MobileCLIPEmbeddingEngine.shared,
         ocrEngine: any VisionOCRProviding = VisionOCREngine.shared,
         featureRepository: (any FeatureSearching)? = nil,
@@ -29,6 +31,7 @@ final class VisionRecognitionPipeline {
     ) {
         self.context = context
         self.imageProcessor = imageProcessor
+        self.objectDetector = objectDetector
         self.embeddingEngine = embeddingEngine
         self.ocrEngine = ocrEngine
         self.featureRepository = featureRepository ?? FeatureRepository(context: context)
@@ -52,10 +55,41 @@ final class VisionRecognitionPipeline {
         let processedImage = try await imageProcessor.process(rawImageData)
         try Task.checkCancellation()
 
-        // 1. 端侧 Apple Vision 极速 OCR 提取图中文字（毫秒级，无内存负担）
+        // 1. 智能目标物体检测与 ROI 提取（剔除背景杂物干扰，降低 Token 与内存占用）
+        var detectedROI: DetectedObjectROI?
+        var targetImage = processedImage
+        var croppedImage: ProcessedCapturedImage?
+
+        if let uiImage = UIImage(data: processedImage.jpegData),
+           let cgImage = uiImage.cgImage {
+            do {
+                detectedROI = try await objectDetector.detectTargetObject(in: cgImage)
+                if let roi = detectedROI, roi.isValid {
+                    if let cropped = ObjectDetectionEngine.crop(image: uiImage, to: roi.normalizedRect, paddingFraction: 0.08) {
+                        croppedImage = cropped
+                        targetImage = cropped
+                        AppLogger.shared.log(
+                            level: .info,
+                            category: .ai,
+                            message: "已成功框选目标物并智能裁剪背景",
+                            details: "id=\(recognitionID), source=\(roi.source), rect=\(roi.normalizedRect), cropped=\(cropped.pixelWidth)x\(cropped.pixelHeight), bytes=\(cropped.jpegData.count / 1_024)KB"
+                        )
+                    }
+                }
+            } catch {
+                AppLogger.shared.log(
+                    level: .warning,
+                    category: .ai,
+                    message: "目标物检测跳过，使用全图识别",
+                    details: "id=\(recognitionID), error=\(error.localizedDescription)"
+                )
+            }
+        }
+
+        // 2. 端侧 Apple Vision 极速 OCR 提取目标物文字（仅识别物料主体，杜绝背景杂字干扰）
         var ocrResult = VisionOCREngine.OCRResult(lines: [], fullText: "", topCandidateTerms: [])
         do {
-            ocrResult = try await ocrEngine.recognizeText(from: processedImage.jpegData)
+            ocrResult = try await ocrEngine.recognizeText(from: targetImage.jpegData)
             AppLogger.shared.log(
                 level: .info,
                 category: .ai,
@@ -71,11 +105,11 @@ final class VisionRecognitionPipeline {
             )
         }
 
-        // 2. 提取 MobileCLIP 图片特征向量并检索候选
+        // 3. 提取 MobileCLIP 图片特征向量（仅提取纯净物料特征，排除背景货架干扰）
         var embedding: ImageEmbedding?
         var matches: [FeatureMatch] = []
         do {
-            let generated = try await embeddingEngine.embed(imageData: processedImage.jpegData)
+            let generated = try await embeddingEngine.embed(imageData: targetImage.jpegData)
             embedding = generated
             matches = try featureRepository.topMatches(
                 queryVector: generated.values,
@@ -100,7 +134,7 @@ final class VisionRecognitionPipeline {
             )
         }
 
-        // 3. 多模态交叉验证（OCR 文本 + 视觉向量双重判定，杜绝同类纸箱误判）
+        // 4. 多模态交叉验证（OCR 文本 + 视觉向量双重判定，杜绝同类纸箱误判）
         if let best = matches.first, let sku = best.sample.sku {
             let candidateName = sku.skuName
             let hasOCR = !ocrResult.fullText.isEmpty
@@ -128,7 +162,9 @@ final class VisionRecognitionPipeline {
                     processedImage: processedImage,
                     embedding: embedding,
                     matches: matches,
-                    source: .vector
+                    source: .vector,
+                    detectedROI: detectedROI,
+                    croppedImage: croppedImage
                 )
             }
 
@@ -163,19 +199,21 @@ final class VisionRecognitionPipeline {
                     processedImage: processedImage,
                     embedding: embedding,
                     matches: matches,
-                    source: .vector
+                    source: .vector,
+                    detectedROI: detectedROI,
+                    croppedImage: croppedImage
                 )
             }
         }
 
-        // 4. 深度图文理解：调用 MiniCPM-V 4.6 端侧多模态模型（或云端 VLM 兜底，传入 OCR 文本作为先验提速）
+        // 5. 深度图文理解：调用 MiniCPM-V 4.6 端侧多模态模型（或云端 VLM 兜底，仅传入目标物裁剪图片，减少 Token 消耗与内存占用）
         try Task.checkCancellation()
         let ocrHint = ocrResult.topCandidateTerms.first ?? (ocrResult.fullText.isEmpty ? nil : ocrResult.fullText)
-        let (fallbackResult, source) = await fallback(processedImage.jpegData, ocrHint)
+        let (fallbackResult, source) = await fallback(targetImage.jpegData, ocrHint)
         try Task.checkCancellation()
         var resolved = fallbackResult
 
-        // 5. 语义纠错与品类/单位增强
+        // 6. 语义纠错与品类/单位增强
         resolved = enrichResult(resolved, ocrResult: ocrResult)
 
         // 在本地已有商品库中模糊比对品名，若匹配已有商品则绑定，否则作为新商品
@@ -192,28 +230,46 @@ final class VisionRecognitionPipeline {
             processedImage: processedImage,
             embedding: embedding,
             matches: matches,
-            source: source
+            source: source,
+            detectedROI: detectedROI,
+            croppedImage: croppedImage
         )
     }
 
-    /// 商品物料建档专用 AI 解析：直接调用多模态 VLM + OCR 提取当前物料属性，绝不被已有商品向量覆盖。
+    /// 商品物料建档专用 AI 解析：智能框选目标物，直接调用多模态 VLM + OCR 提取物料属性
     func extractAttributesForNewSKU(rawImageData: Data) async throws -> VisionRecognitionOutcome {
         let recognitionID = String(UUID().uuidString.prefix(8))
         let processedImage = try await imageProcessor.process(rawImageData)
         try Task.checkCancellation()
 
-        // 1. OCR 提取文本
-        let ocrResult = (try? await ocrEngine.recognizeText(from: processedImage.jpegData)) ?? VisionOCREngine.OCRResult(lines: [], fullText: "", topCandidateTerms: [])
+        // 1. 目标物智能框选与背景剔除
+        var detectedROI: DetectedObjectROI?
+        var targetImage = processedImage
+        var croppedImage: ProcessedCapturedImage?
 
-        // 2. 计算当前图片特征向量（用于建档保存样本）
-        let embedding = try? await embeddingEngine.embed(imageData: processedImage.jpegData)
+        if let uiImage = UIImage(data: processedImage.jpegData),
+           let cgImage = uiImage.cgImage {
+            detectedROI = try? await objectDetector.detectTargetObject(in: cgImage)
+            if let roi = detectedROI, roi.isValid {
+                if let cropped = ObjectDetectionEngine.crop(image: uiImage, to: roi.normalizedRect, paddingFraction: 0.08) {
+                    croppedImage = cropped
+                    targetImage = cropped
+                }
+            }
+        }
 
-        // 3. 直接调用端侧 MiniCPM-V / 云端 VLM 进行物料属性结构化解析（传入 OCR 文本先验提速）
+        // 2. OCR 提取文本（聚焦目标物）
+        let ocrResult = (try? await ocrEngine.recognizeText(from: targetImage.jpegData)) ?? VisionOCREngine.OCRResult(lines: [], fullText: "", topCandidateTerms: [])
+
+        // 3. 计算目标物特征向量（用于建档保存样本）
+        let embedding = try? await embeddingEngine.embed(imageData: targetImage.jpegData)
+
+        // 4. 调用端侧 MiniCPM-V / 云端 VLM 进行物料属性解析（仅输入目标物裁剪图，省 token 省内存）
         let ocrHint = ocrResult.topCandidateTerms.first ?? (ocrResult.fullText.isEmpty ? nil : ocrResult.fullText)
-        let (fallbackResult, source) = await fallback(processedImage.jpegData, ocrHint)
+        let (fallbackResult, source) = await fallback(targetImage.jpegData, ocrHint)
         var resolved = fallbackResult
 
-        // 4. 应用端侧智能语义纠错与分类/单位推断增强
+        // 5. 应用端侧智能语义纠错与分类/单位推断增强
         resolved = enrichResult(resolved, ocrResult: ocrResult)
 
         return VisionRecognitionOutcome(
@@ -222,7 +278,9 @@ final class VisionRecognitionPipeline {
             processedImage: processedImage,
             embedding: embedding,
             matches: [],
-            source: source
+            source: source,
+            detectedROI: detectedROI,
+            croppedImage: croppedImage
         )
     }
 

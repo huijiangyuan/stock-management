@@ -69,18 +69,64 @@ final class InventoryStore {
     private func applyToInventory(type: String, sku: RawMaterialSKU,
                                   batch: StockBatch?, qty: Double,
                                   location: String) throws {
-        let inv = fetchOrCreateInventory(location: location, sku: sku, batch: batch)
         switch type {
         case "INBOUND":
+            let inv = fetchOrCreateInventory(location: location, sku: sku, batch: batch)
             inv.qtyBaseUnit += qty
+            inv.updatedAt = Date()
         case "OUTBOUND":
-            inv.qtyBaseUnit = max(0, inv.qtyBaseUnit - qty)
+            if let batch = batch {
+                // 1. 明确指定了出库批次：优先扣减该批次
+                let inv = fetchOrCreateInventory(location: location, sku: sku, batch: batch)
+                if inv.qtyBaseUnit >= qty {
+                    inv.qtyBaseUnit -= qty
+                    inv.updatedAt = Date()
+                } else {
+                    // 若当前批次不足，该批次清零，剩余数量自动按 FIFO 顺延扣减其它批次
+                    var remaining = qty - inv.qtyBaseUnit
+                    inv.qtyBaseUnit = 0
+                    inv.updatedAt = Date()
+
+                    let otherInvs = sku.inventories
+                        .filter { (location.isEmpty || $0.locationName == location) && $0.batch?.batchId != batch.batchId && $0.qtyBaseUnit > 0 }
+                        .sorted { ($0.batch?.expirationDate ?? .distantFuture) < ($1.batch?.expirationDate ?? .distantFuture) }
+                    for other in otherInvs {
+                        guard remaining > 0 else { break }
+                        let deduct = min(other.qtyBaseUnit, remaining)
+                        other.qtyBaseUnit -= deduct
+                        other.updatedAt = Date()
+                        remaining -= deduct
+                    }
+                }
+            } else {
+                // 2. 未指定具体批次（如快捷出库）：严格按 FIFO 依次扣减最早在库批次
+                var remaining = qty
+                let candidateInvs = sku.inventories
+                    .filter { (location.isEmpty || $0.locationName == location) && $0.qtyBaseUnit > 0 }
+                    .sorted { ($0.batch?.expirationDate ?? .distantFuture) < ($1.batch?.expirationDate ?? .distantFuture) }
+
+                for inv in candidateInvs {
+                    guard remaining > 0 else { break }
+                    let deduct = min(inv.qtyBaseUnit, remaining)
+                    inv.qtyBaseUnit -= deduct
+                    inv.updatedAt = Date()
+                    remaining -= deduct
+                }
+
+                // 若库内原本毫无批次库存记录，兜底在当前库位更新无批次记录（保持防负数保护）
+                if candidateInvs.isEmpty {
+                    let inv = fetchOrCreateInventory(location: location, sku: sku, batch: nil)
+                    inv.qtyBaseUnit = max(0, inv.qtyBaseUnit - qty)
+                    inv.updatedAt = Date()
+                }
+            }
         case "CHECK":
+            let inv = fetchOrCreateInventory(location: location, sku: sku, batch: batch)
             inv.qtyBaseUnit = qty
+            inv.updatedAt = Date()
         default:
             break
         }
-        inv.updatedAt = Date()
     }
 
     private func fetchOrCreateInventory(location: String, sku: RawMaterialSKU,
@@ -144,14 +190,15 @@ final class InventoryStore {
         }
     }
 
-    /// 缺货：存在库存记录但剩余为 0 的 SKU
+    /// 缺货：在指定仓库（或全部仓库）中，当前可用总在库量为 0 的 SKU（避免单批次出完导致多批次误报缺货）
     func outOfStock(location: String? = nil) -> [RawMaterialSKU] {
-        let descriptor = FetchDescriptor<StockInventory>(predicate: #Predicate { $0.qtyBaseUnit == 0 })
-        guard let invs = try? context.fetch(descriptor) else { return [] }
-        let filtered = invs.filter { inv in
-            location == nil || location!.isEmpty || inv.locationName == location!
+        let descriptor = FetchDescriptor<RawMaterialSKU>()
+        guard let skus = try? context.fetch(descriptor) else { return [] }
+        let targetLoc = (location?.isEmpty == true) ? nil : location
+        return skus.filter { sku in
+            let total = totalQty(location: targetLoc, sku: sku)
+            return total <= 0
         }
-        return Array(Set(filtered.compactMap { $0.sku }))
     }
 
     // MARK: - 单据号生成

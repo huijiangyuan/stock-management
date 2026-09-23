@@ -53,6 +53,8 @@ private final class NextLevelCameraViewController: UIViewController {
     private let camera = NextLevel.shared
     private let captureButton = UIButton(type: .system)
     private let statusLabel = UILabel()
+    private let detectionOverlayView = CameraDetectionOverlayView()
+    private var lastDetectionTimestamp: TimeInterval = 0
     private var state: State = .idle
     private var pendingPhotoData: Data?
     private var pendingCaptureFailure: String?
@@ -71,6 +73,7 @@ private final class NextLevelCameraViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         camera.previewLayer.frame = view.layer.bounds
+        detectionOverlayView.frame = view.layer.bounds
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -85,6 +88,7 @@ private final class NextLevelCameraViewController: UIViewController {
     private func configureCamera() {
         camera.delegate = self
         camera.photoDelegate = self
+        camera.videoDelegate = self
         camera.captureMode = .photo
         camera.devicePosition = .back
         camera.photoConfiguration.preset = .photo
@@ -177,6 +181,11 @@ private final class NextLevelCameraViewController: UIViewController {
         let point = recognizer.location(in: view)
         let adjustedPoint = camera.previewLayer.captureDevicePointConverted(fromLayerPoint: point)
         camera.focusExposeAndAdjustWhiteBalance(atAdjustedPoint: adjustedPoint)
+
+        let normX = max(0.05, min(0.95, point.x / max(view.bounds.width, 1.0)))
+        let normY = max(0.05, min(0.95, point.y / max(view.bounds.height, 1.0)))
+        let tapRect = CGRect(x: max(0, normX - 0.18), y: max(0, normY - 0.18), width: 0.36, height: 0.36)
+        detectionOverlayView.updateROI(normalizedRect: tapRect, animated: true)
     }
 
     private func stopSessionAndComplete() {
@@ -272,6 +281,7 @@ private final class NextLevelCameraViewController: UIViewController {
     private func releaseDelegates() {
         if camera.delegate === self { camera.delegate = nil }
         if camera.photoDelegate === self { camera.photoDelegate = nil }
+        if camera.videoDelegate === self { camera.videoDelegate = nil }
     }
 
     private func configureInterface() {
@@ -303,6 +313,7 @@ private final class NextLevelCameraViewController: UIViewController {
         statusLabel.clipsToBounds = true
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        view.addSubview(detectionOverlayView)
         view.addSubview(closeButton)
         view.addSubview(captureButton)
         view.addSubview(statusLabel)
@@ -446,4 +457,42 @@ extension NextLevelCameraViewController: NextLevelPhotoDelegate {
         AppLogger.shared.log(level: .info, category: .camera, message: "NextLevel 拍照事务已完成，开始释放相机会话")
         stopSessionAndComplete()
     }
+}
+
+extension NextLevelCameraViewController: NextLevelVideoDelegate {
+    func nextLevel(_ nextLevel: NextLevel, didUpdateVideoZoomFactor videoZoomFactor: Float) {}
+
+    func nextLevel(_ nextLevel: NextLevel, willProcessRawVideoSampleBuffer sampleBuffer: CMSampleBuffer, onQueue queue: DispatchQueue) {
+        guard state == .running else { return }
+
+        // 8Hz 节流：至少间隔 120ms
+        let now = CACurrentMediaTime()
+        guard now - lastDetectionTimestamp >= 0.12 else { return }
+        lastDetectionTimestamp = now
+
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+        Task { [weak self] in
+            guard let self, self.state == .running else { return }
+            do {
+                let detected = try await ObjectDetectionEngine.shared.detectTargetObject(in: pixelBuffer)
+                await MainActor.run {
+                    guard self.state == .running else { return }
+                    self.detectionOverlayView.updateROI(normalizedRect: detected?.normalizedRect)
+                }
+            } catch {
+                // 忽略视频流单帧检测瞬态错误
+            }
+        }
+    }
+
+    func nextLevel(_ nextLevel: NextLevel, renderToCustomContextWithImageBuffer imageBuffer: CVPixelBuffer, onQueue queue: DispatchQueue) {}
+    func nextLevel(_ nextLevel: NextLevel, willProcessFrame frame: AnyObject, timestamp: TimeInterval, onQueue queue: DispatchQueue) {}
+    func nextLevel(_ nextLevel: NextLevel, didSetupVideoInSession session: NextLevelSession) {}
+    func nextLevel(_ nextLevel: NextLevel, didSetupAudioInSession session: NextLevelSession) {}
+    func nextLevel(_ nextLevel: NextLevel, didStartClipInSession session: NextLevelSession) {}
+    func nextLevel(_ nextLevel: NextLevel, didCompleteClip clip: NextLevelClip, inSession session: NextLevelSession) {}
+    func nextLevel(_ nextLevel: NextLevel, didAppendVideoSampleBuffer sampleBuffer: CMSampleBuffer, inSession session: NextLevelSession) {}
+    func nextLevel(_ nextLevel: NextLevel, didSkipVideoSampleBuffer sampleBuffer: CMSampleBuffer, inSession session: NextLevelSession) {}
+    func nextLevel(_ nextLevel: NextLevel, didAppendVideoPixelBuffer pixelBuffer: CVPixelBuffer, timestamp: TimeInterval, inSession session: NextLevelSession) {}
 }

@@ -388,6 +388,16 @@ struct OrderCreateView: View {
             } message: {
                 Text(submitErrorMessage)
             }
+            .onAppear {
+                if orderType != "INBOUND", let sku = selectedSKU, selectedBatch == nil {
+                    selectedBatch = InventoryStore(context: ctx).fifoBatches(for: sku).first
+                }
+            }
+            .onChange(of: selectedSKU) { _, newSKU in
+                if orderType != "INBOUND", let sku = newSKU {
+                    selectedBatch = InventoryStore(context: ctx).fifoBatches(for: sku).first
+                }
+            }
             .onDisappear {
                 recognitionTask?.cancel()
                 recognitionTask = nil
@@ -441,6 +451,7 @@ struct OrderCreateView: View {
                 Text("当前无在库批次").foregroundColor(.secondary)
             } else {
                 ForEach(inStockBatches) { batch in
+                    let isSelected = (selectedBatch?.batchId == batch.batchId) || (selectedBatch == nil && inStockBatches.first?.batchId == batch.batchId)
                     Button {
                         if inStockBatches.first?.batchId == batch.batchId || orderType == "CHECK" {
                             selectedBatch = batch
@@ -450,7 +461,7 @@ struct OrderCreateView: View {
                         }
                     } label: {
                         BatchPickRow(batch: batch,
-                                     selected: selectedBatch?.batchId == batch.batchId,
+                                     selected: isSelected,
                                      isEarliest: inStockBatches.first?.batchId == batch.batchId)
                     }
                     .buttonStyle(.plain)
@@ -473,7 +484,7 @@ struct OrderCreateView: View {
             ctx.insert(newBatch)
             batch = newBatch
         } else {
-            batch = selectedBatch
+            batch = selectedBatch ?? inStockBatches.first
         }
 
         if lastMode == .vision, !didSaveLatestVisionSample, let outcome = latestVisionOutcome {
@@ -685,6 +696,9 @@ struct OrderCreateView: View {
         if let sku = result.sku {
             selectedSKU = sku
             selectedUnit = result.packagingUnit ?? sku.packagingUnits.first
+            if orderType != "INBOUND" {
+                selectedBatch = InventoryStore(context: ctx).fifoBatches(for: sku).first
+            }
             if let pd = result.productionDate { productionDate = pd }
             if let ed = result.expirationDate { expirationDate = ed }
             if let s = result.recognizedSupplier, !s.isEmpty { supplier = s }

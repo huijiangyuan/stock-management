@@ -23,6 +23,7 @@ struct AIRecognitionResultView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var inputName: String = ""
+    @State private var showFullImage: Bool = false
 
     init(outcome: VisionRecognitionOutcome,
          onConfirm: @escaping () -> Void,
@@ -75,24 +76,49 @@ struct AIRecognitionResultView: View {
         return "未识别"
     }
 
-    private var image: UIImage? {
-        UIImage(data: outcome.processedImage.jpegData)
+    private var displayImage: UIImage? {
+        if !showFullImage, let cropped = outcome.croppedImage {
+            return UIImage(data: cropped.jpegData)
+        }
+        return UIImage(data: outcome.processedImage.jpegData)
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: AppSpacing.s4) {
-                    // ── 图片缩略图 ──────────────────────────────────
-                    if let img = image {
-                        Image(uiImage: img)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 200)
-                            .clipped()
-                            .clipShape(RoundedRectangle(cornerRadius: AppRadius.standard, style: .continuous))
-                            .padding(.horizontal, AppSpacing.s3)
+                    // ── 图片缩略图（支持目标物特写与拍摄全景图切换） ───────────
+                    if let img = displayImage {
+                        ZStack(alignment: .topTrailing) {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity)
+                                .frame(maxHeight: 220)
+                                .background(Color.black.opacity(0.85))
+                                .clipShape(RoundedRectangle(cornerRadius: AppRadius.standard, style: .continuous))
+
+                            if outcome.croppedImage != nil {
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        showFullImage.toggle()
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: showFullImage ? "viewfinder" : "photo")
+                                        Text(showFullImage ? "切至目标特写" : "🎯 目标已框选 (看全景)")
+                                    }
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 5)
+                                    .background(Color.black.opacity(0.65))
+                                    .clipShape(Capsule())
+                                }
+                                .padding(8)
+                            }
+                        }
+                        .padding(.horizontal, AppSpacing.s3)
                     }
 
                     // ── 置信度进度条 ────────────────────────────────

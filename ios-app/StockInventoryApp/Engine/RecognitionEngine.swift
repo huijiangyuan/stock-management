@@ -121,6 +121,8 @@ struct VisionRecognitionOutcome {
     let embedding: ImageEmbedding?
     let matches: [FeatureMatch]
     let source: VisionRecognitionSource
+    var detectedROI: DetectedObjectROI? = nil
+    var croppedImage: ProcessedCapturedImage? = nil
 }
 
 /// 可插拔识别引擎协议。条码 / 手动 / 视觉（云端 VLM）统一走 recognize。
