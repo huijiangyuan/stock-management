@@ -44,7 +44,9 @@ final class ObjectDetectionEngineTests: XCTestCase {
 
     func testCropImageGeneratesValidCroppedImage() {
         // 创建一个 400x400 的测试图像，并在中心绘制一个红色方块
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 400, height: 400))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1.0
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 400, height: 400), format: format)
         let testImage = renderer.image { ctx in
             UIColor.white.setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: 400, height: 400))
@@ -67,7 +69,9 @@ final class ObjectDetectionEngineTests: XCTestCase {
 
     func testDetectTargetObjectOnSynthesizedImage() async throws {
         // 创建一个有明确前景物体的测试图（黑色背景，中间有明亮的绿色方块）
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 300))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1.0
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 300), format: format)
         let testImage = renderer.image { ctx in
             UIColor.black.setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: 300, height: 300))
