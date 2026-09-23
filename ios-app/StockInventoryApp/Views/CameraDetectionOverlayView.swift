@@ -68,7 +68,7 @@ final class CameraDetectionOverlayView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         if let rect = currentNormalizedRect {
-            updateFrames(for: rect, animated: false)
+            showBox(for: rect, animated: false)
         }
     }
 
