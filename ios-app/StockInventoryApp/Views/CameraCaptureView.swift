@@ -88,6 +88,7 @@ private final class NextLevelCameraViewController: UIViewController {
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         cancelWatchdogs()
+        ObjectDetectionEngine.shared.resetTracker()
         if state != .finished {
             camera.stop()
             releaseDelegates()
@@ -193,6 +194,11 @@ private final class NextLevelCameraViewController: UIViewController {
 
         // 仅在点击位置显示轻量对焦提示动画，不影响真实目标检测框
         showFocusIndicator(at: point)
+
+        // 多物体场景下，用户点击哪里，优先锁定点击位置附近的物料
+        let normX = max(0.0, min(1.0, point.x / max(view.bounds.width, 1.0)))
+        let normY = max(0.0, min(1.0, point.y / max(view.bounds.height, 1.0)))
+        ObjectDetectionEngine.shared.prioritizeTarget(near: CGPoint(x: normX, y: normY))
     }
 
     private func showFocusIndicator(at point: CGPoint) {

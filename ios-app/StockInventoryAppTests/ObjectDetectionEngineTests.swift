@@ -126,4 +126,58 @@ final class ObjectDetectionEngineTests: XCTestCase {
             XCTAssertLessThan(detected.normalizedRect.width, 0.9)
         }
     }
+
+    func testTemporalTrackerLocksOnInitialCandidateAndSmoothsJitter() {
+        let tracker = TemporalObjectTracker()
+
+        // 初始帧：物体在中央 (0.35, 0.35, 0.3, 0.3)
+        let box1 = DetectedObjectROI(
+            normalizedRect: CGRect(x: 0.35, y: 0.35, width: 0.30, height: 0.30),
+            confidence: 0.90,
+            source: "rectangle_contour"
+        )
+        let result1 = tracker.process(candidates: [box1], timestamp: 1.0)
+        XCTAssertNotNil(result1)
+        XCTAssertEqual(result1?.normalizedRect.origin.x ?? 0, 0.35, accuracy: 0.001)
+
+        // 第 2 帧：微小手抖位移到 (0.36, 0.355, 0.302, 0.298)
+        let box2 = DetectedObjectROI(
+            normalizedRect: CGRect(x: 0.36, y: 0.355, width: 0.302, height: 0.298),
+            confidence: 0.88,
+            source: "rectangle_contour"
+        )
+        let result2 = tracker.process(candidates: [box2], timestamp: 1.1)
+        XCTAssertNotNil(result2)
+
+        // 经过 EMA 平滑滤波后，x 应该平滑过渡在 0.35 与 0.36 之间
+        guard let rect2 = result2?.normalizedRect else { return }
+        XCTAssertGreaterThan(rect2.origin.x, 0.350)
+        XCTAssertLessThan(rect2.origin.x, 0.360)
+    }
+
+    func testTemporalTrackerResistsFlippingWhenSecondObjectAppears() {
+        let tracker = TemporalObjectTracker()
+
+        // 帧 1：首先锁定中心物体 A (0.3, 0.3, 0.4, 0.4)
+        let objectA = DetectedObjectROI(
+            normalizedRect: CGRect(x: 0.30, y: 0.30, width: 0.40, height: 0.40),
+            confidence: 0.85,
+            source: "rectangle_contour"
+        )
+        _ = tracker.process(candidates: [objectA], timestamp: 1.0)
+
+        // 帧 2：旁边出现另一个物体 B (0.05, 0.05, 0.2, 0.2)，即使置信度稍高，也必须维持锁定 A，绝不横跳！
+        let objectB = DetectedObjectROI(
+            normalizedRect: CGRect(x: 0.05, y: 0.05, width: 0.20, height: 0.20),
+            confidence: 0.95,
+            source: "rectangle_contour"
+        )
+        let result2 = tracker.process(candidates: [objectA, objectB], timestamp: 1.1)
+        XCTAssertNotNil(result2)
+
+        // 验证当前仍然锁定的是 A（x 接近 0.30，而不是跳到了 0.05 的 B）
+        let lockedX = result2?.normalizedRect.origin.x ?? 0
+        XCTAssertGreaterThan(lockedX, 0.25)
+        XCTAssertLessThan(lockedX, 0.35)
+    }
 }

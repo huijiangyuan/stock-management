@@ -108,7 +108,17 @@ final class CameraDetectionOverlayView: UIView {
         }
         statusBadge.text = badgeText
 
-        let duration = animated ? 0.14 : 0.0
+        // 像素级微小晃动死区抑制（静止时绝对不跳动）
+        let currentFrame = boxContainerView.frame
+        if isBoxVisible,
+           abs(currentFrame.origin.x - targetFrame.origin.x) < 2.0,
+           abs(currentFrame.origin.y - targetFrame.origin.y) < 2.0,
+           abs(currentFrame.size.width - targetFrame.size.width) < 2.0,
+           abs(currentFrame.size.height - targetFrame.size.height) < 2.0 {
+            return
+        }
+
+        let duration = animated ? 0.08 : 0.0
         UIView.animate(
             withDuration: duration,
             delay: 0,
