@@ -65,21 +65,55 @@ final class ObjectDetectionEngine: ObjectDetectorProviding {
         handler: VNImageRequestHandler,
         continuation: CheckedContinuation<DetectedObjectROI?, any Error>
     ) {
-        // 1. 基于前景物料显著性分析（Objectness Saliency，专门检测物理实体前景）
+        // 1. 规则几何轮廓与矩形物料检测（包装盒、物料箱、托盘、商品包装、标牌）
+        let rectangleRequest = VNDetectRectanglesRequest()
+        rectangleRequest.minimumConfidence = 0.55
+        rectangleRequest.minimumAspectRatio = 0.15
+        rectangleRequest.maximumAspectRatio = 4.0
+        rectangleRequest.minimumSize = 0.12 // 至少占画面 12%
+        rectangleRequest.maximumObservations = 5
+
+        // 2. 基于前景物料显著性分析（Objectness Saliency，针对袋装物、零件等不规则物理实体）
         let objectnessRequest = VNGenerateObjectnessBasedSaliencyImageRequest()
-        // 2. 基于视觉注意力焦点分析（Attention Saliency，检测视觉重心）
+
+        // 3. 基于视觉注意力焦点分析（Attention Saliency，中心焦点兜底）
         let attentionRequest = VNGenerateAttentionBasedSaliencyImageRequest()
 
         do {
-            try handler.perform([objectnessRequest, attentionRequest])
+            try handler.perform([rectangleRequest, objectnessRequest, attentionRequest])
 
             var bestROI: DetectedObjectROI?
 
-            // 优先检查 Objectness Saliency 提取的具体显著物料对象
-            if let objectnessResult = objectnessRequest.results?.first,
+            // 优先策略 1：检查是否有明确的矩形包装/物料轮廓
+            if let rectangles = rectangleRequest.results, !rectangles.isEmpty {
+                // 筛选靠近中央、面积合理的矩形轮廓
+                let candidates = rectangles.compactMap { rect -> (CGRect, Float)? in
+                    let uikitRect = Self.convertVisionRectToUIKit(rect.boundingBox)
+                    let area = uikitRect.width * uikitRect.height
+                    guard area >= minimumAreaRatio && area <= maximumAreaRatio else { return nil }
+                    return (uikitRect, rect.confidence)
+                }
+
+                if let bestRect = candidates.min(by: {
+                    let center0 = CGPoint(x: $0.0.midX, y: $0.0.midY)
+                    let center1 = CGPoint(x: $1.0.midX, y: $1.0.midY)
+                    let dist0 = hypot(center0.x - 0.5, center0.y - 0.5)
+                    let dist1 = hypot(center1.x - 0.5, center1.y - 0.5)
+                    return dist0 < dist1
+                }) {
+                    bestROI = DetectedObjectROI(
+                        normalizedRect: bestRect.0,
+                        confidence: bestRect.1,
+                        source: "rectangle_contour"
+                    )
+                }
+            }
+
+            // 优先策略 2：若无明显规则矩形，采用 Objectness Saliency 提取的前景实体
+            if bestROI == nil,
+               let objectnessResult = objectnessRequest.results?.first,
                let salientObjects = objectnessResult.salientObjects,
                !salientObjects.isEmpty {
-                // 取面积最大或最靠近中央的显著物料对象
                 if let bestObject = salientObjects.max(by: { $0.boundingBox.width * $0.boundingBox.height < $1.boundingBox.width * $1.boundingBox.height }) {
                     let convertedRect = Self.convertVisionRectToUIKit(bestObject.boundingBox)
                     let area = convertedRect.width * convertedRect.height
@@ -93,7 +127,7 @@ final class ObjectDetectionEngine: ObjectDetectorProviding {
                 }
             }
 
-            // 若 Objectness 未能命中合适物体，尝试从 Attention Saliency 显著物体重心提取
+            // 优先策略 3：视觉注意力焦点重心提取兜底
             if bestROI == nil,
                let attentionResult = attentionRequest.results?.first,
                let salientObjects = attentionResult.salientObjects,

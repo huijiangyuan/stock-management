@@ -96,4 +96,34 @@ final class ObjectDetectionEngineTests: XCTestCase {
             XCTAssertGreaterThan(detected.normalizedRect.height, 0.1)
         }
     }
+
+    func testDetectRectangleContourOnBoxImage() async throws {
+        // 创建一个高对比度矩形包装箱图案（浅灰背景，中央深色矩形盒子）
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1.0
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 400, height: 400), format: format)
+        let boxImage = renderer.image { ctx in
+            UIColor.lightGray.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: 400, height: 400))
+
+            UIColor.darkGray.setFill()
+            ctx.fill(CGRect(x: 80, y: 100, width: 240, height: 180))
+        }
+
+        guard let cgImage = boxImage.cgImage else {
+            XCTFail("无法生成 CGImage")
+            return
+        }
+
+        let engine = ObjectDetectionEngine.shared
+        let roi = try await engine.detectTargetObject(in: cgImage)
+
+        XCTAssertNotNil(roi)
+        if let detected = roi {
+            XCTAssertTrue(detected.isValid)
+            // 归一化宽度应在 0.4 ~ 0.8 之间
+            XCTAssertGreaterThan(detected.normalizedRect.width, 0.3)
+            XCTAssertLessThan(detected.normalizedRect.width, 0.9)
+        }
+    }
 }

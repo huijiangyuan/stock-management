@@ -14,6 +14,9 @@ Vendored source: NextLevel `0.19.1`.
   the existing main-queue delivery contract under Swift 6 strict concurrency.
 - Return an explicit start result from static photo capture, propagate native
   capture errors, and provide a deterministic stop completion callback.
+- Added `AVCaptureVideoDataOutput` in `.photo` capture mode and routed video sample
+  buffers directly to `videoDelegate` for real-time Vision/YOLO object detection and
+  contour tracking in the camera preview without stalling the photo capture session.
 
 These changes preserve preview, focus, and image output semantics while making
 photo capture failure and session-stop completion explicit to the application.

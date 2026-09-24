@@ -54,6 +54,15 @@ private final class NextLevelCameraViewController: UIViewController {
     private let captureButton = UIButton(type: .system)
     private let statusLabel = UILabel()
     private let detectionOverlayView = CameraDetectionOverlayView()
+    private let focusIndicatorView: UIView = {
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 68, height: 68))
+        view.layer.borderColor = UIColor.systemYellow.cgColor
+        view.layer.borderWidth = 1.5
+        view.layer.cornerRadius = 6
+        view.alpha = 0
+        view.isUserInteractionEnabled = false
+        return view
+    }()
     private var lastDetectionTimestamp: TimeInterval = 0
     private var state: State = .idle
     private var pendingPhotoData: Data?
@@ -182,10 +191,22 @@ private final class NextLevelCameraViewController: UIViewController {
         let adjustedPoint = camera.previewLayer.captureDevicePointConverted(fromLayerPoint: point)
         camera.focusExposeAndAdjustWhiteBalance(atAdjustedPoint: adjustedPoint)
 
-        let normX = max(0.05, min(0.95, point.x / max(view.bounds.width, 1.0)))
-        let normY = max(0.05, min(0.95, point.y / max(view.bounds.height, 1.0)))
-        let tapRect = CGRect(x: max(0, normX - 0.18), y: max(0, normY - 0.18), width: 0.36, height: 0.36)
-        detectionOverlayView.updateROI(normalizedRect: tapRect, animated: true)
+        // 仅在点击位置显示轻量对焦提示动画，不影响真实目标检测框
+        showFocusIndicator(at: point)
+    }
+
+    private func showFocusIndicator(at point: CGPoint) {
+        focusIndicatorView.center = point
+        focusIndicatorView.transform = CGAffineTransform(scaleX: 1.25, y: 1.25)
+        focusIndicatorView.alpha = 1.0
+
+        UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseOut]) {
+            self.focusIndicatorView.transform = .identity
+        } completion: { _ in
+            UIView.animate(withDuration: 0.35, delay: 0.4, options: [.curveEaseIn]) {
+                self.focusIndicatorView.alpha = 0
+            }
+        }
     }
 
     private func stopSessionAndComplete() {
@@ -314,6 +335,7 @@ private final class NextLevelCameraViewController: UIViewController {
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(detectionOverlayView)
+        view.addSubview(focusIndicatorView)
         view.addSubview(closeButton)
         view.addSubview(captureButton)
         view.addSubview(statusLabel)
@@ -364,7 +386,7 @@ extension NextLevelCameraViewController: NextLevelDelegate {
         guard state == .starting else { return }
         state = .running
         captureButton.isEnabled = true
-        statusLabel.text = "点击画面可对焦"
+        statusLabel.text = "对准物料可自动检测框选"
         AppLogger.shared.log(level: .info, category: .camera, message: "NextLevel 相机会话已就绪")
     }
 
@@ -465,12 +487,15 @@ extension NextLevelCameraViewController: NextLevelVideoDelegate {
     func nextLevel(_ nextLevel: NextLevel, willProcessRawVideoSampleBuffer sampleBuffer: CMSampleBuffer, onQueue queue: DispatchQueue) {
         guard state == .running else { return }
 
-        // 8Hz 节流：至少间隔 120ms
+        // 10Hz 节流：至少间隔 100ms，保证低功耗与平滑帧率
         let now = CACurrentMediaTime()
-        guard now - lastDetectionTimestamp >= 0.12 else { return }
+        guard now - lastDetectionTimestamp >= 0.10 else { return }
         lastDetectionTimestamp = now
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+        let bufferWidth = CGFloat(CVPixelBufferGetWidth(pixelBuffer))
+        let bufferHeight = CGFloat(CVPixelBufferGetHeight(pixelBuffer))
 
         Task { [weak self] in
             guard let self, self.state == .running else { return }
@@ -478,7 +503,10 @@ extension NextLevelCameraViewController: NextLevelVideoDelegate {
                 let detected = try await ObjectDetectionEngine.shared.detectTargetObject(in: pixelBuffer)
                 await MainActor.run {
                     guard self.state == .running else { return }
-                    self.detectionOverlayView.updateROI(normalizedRect: detected?.normalizedRect)
+                    self.detectionOverlayView.updateDetection(
+                        roi: detected,
+                        videoBufferSize: CGSize(width: bufferWidth, height: bufferHeight)
+                    )
                 }
             } catch {
                 // 忽略视频流单帧检测瞬态错误

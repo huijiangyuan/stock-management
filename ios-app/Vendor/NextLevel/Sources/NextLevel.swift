@@ -1001,6 +1001,7 @@ extension NextLevel {
             }
 
             _ = self.addPhotoOutput()
+            _ = self.addVideoOutput()
             #if USE_TRUE_DEPTH
             if self.depthDataCaptureEnabled {
                 _ = self.addDepthDataOutput()
@@ -1153,7 +1154,7 @@ extension NextLevel {
 
         if self._videoOutput == nil {
             self._videoOutput = AVCaptureVideoDataOutput()
-            self._videoOutput?.alwaysDiscardsLateVideoFrames = false
+            self._videoOutput?.alwaysDiscardsLateVideoFrames = true
 
             var videoSettings = [String(kCVPixelBufferPixelFormatTypeKey): Int(kCVPixelFormatType_32BGRA)]
             #if !( targetEnvironment(simulator) )
@@ -3029,31 +3030,16 @@ extension NextLevel {
 extension NextLevel: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
 
     public func captureOutput(_ captureOutput: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        if (self.captureMode == .videoWithoutAudio ||  self.captureMode == .arKitWithoutAudio) &&
-            captureOutput == self._videoOutput {
+        if captureOutput == self._videoOutput {
             self.videoDelegate?.nextLevel(self, willProcessRawVideoSampleBuffer: sampleBuffer, onQueue: self._sessionQueue)
             self._lastVideoFrame = sampleBuffer
             if let session = self._recordingSession {
                 self.handleVideoOutput(sampleBuffer: sampleBuffer, session: session)
             }
-        } else if let videoOutput = self._videoOutput,
-            let audioOutput = self._audioOutput {
-            switch captureOutput {
-            case videoOutput:
-                self.videoDelegate?.nextLevel(self, willProcessRawVideoSampleBuffer: sampleBuffer, onQueue: self._sessionQueue)
-                self._lastVideoFrame = sampleBuffer
-                if let session = self._recordingSession {
-                    self.handleVideoOutput(sampleBuffer: sampleBuffer, session: session)
-                }
-                break
-            case audioOutput:
-                self._lastAudioFrame = sampleBuffer
-                if let session = self._recordingSession {
-                    self.handleAudioOutput(sampleBuffer: sampleBuffer, session: session)
-                }
-                break
-            default:
-                break
+        } else if let audioOutput = self._audioOutput, captureOutput == audioOutput {
+            self._lastAudioFrame = sampleBuffer
+            if let session = self._recordingSession {
+                self.handleAudioOutput(sampleBuffer: sampleBuffer, session: session)
             }
         }
     }
